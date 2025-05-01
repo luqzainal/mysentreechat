@@ -46,7 +46,7 @@ const MediaStoragePage = () => {
   const fetchMedia = async () => {
     setIsLoading(true);
     try {
-      const response = await api.get('/api/media');
+      const response = await api.get('/media');
       setMediaList(response.data);
     } catch (error) {
       console.error("Failed to get media list:", error);
@@ -98,7 +98,7 @@ const MediaStoragePage = () => {
     setUploadProgress(0);
 
     try {
-      const response = await api.post('/api/media/upload', formData, {
+      const response = await api.post('/media/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -127,7 +127,7 @@ const MediaStoragePage = () => {
   // Kendalikan pemadaman fail
   const handleDelete = async (mediaId) => {
     try {
-      await api.delete(`/api/media/${mediaId}`);
+      await api.delete(`/media/${mediaId}`);
       // Remove item from state
       setMediaList(prevList => prevList.filter(media => media._id !== mediaId));
       toast.success("Media file deleted successfully.");
