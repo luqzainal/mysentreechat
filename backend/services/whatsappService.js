@@ -1,13 +1,12 @@
-import Baileys from '@whiskeysockets/baileys'; // Import keseluruhan modul
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = Baileys; // Destrukturisasi default dan named exports
-// import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys'; // Buang cara lama
+import pkg from 'whatsapp-web.js'; // Import default dari CJS
+const { Client, LocalAuth, MessageMedia } = pkg; // Destructure named exports
+
 import OpenAI from 'openai'; // Import OpenAI
 import AutoresponderSetting from '../models/AutoresponderSetting.js'; // <-- Import model tetapan
 import User from '../models/User.js'; // Import User model
 import WhatsappConnection from '../models/WhatsappConnection.js'; // Import WhatsappConnection model
 import Message from '../models/Message.js'; // <-- Tambah import Message model
 import qrcode from 'qrcode';
-import { Boom } from '@hapi/boom';
 import path from 'path'; // Perlu path untuk __dirname dalam ES Modules
 import { fileURLToPath } from 'url';
 import { processSpintax } from '../utils/spintaxUtils.js'; // Import fungsi spintax
@@ -25,310 +24,396 @@ const PLAN_LIMITS = {
     'default': 1 
 };
 
-// Simpan instance sock dan data berkaitan
-let sock = null;
+// Gunakan Map untuk menyimpan instance client per userId
+const clients = new Map(); // Map<userId, Client>
 let globalIO = null; // Simpan instance IO global
-let currentUserId = null; // Jejaki userId untuk instance semasa
-
-// Fungsi helper untuk dapatkan teks mesej
-const getMessageText = (message) => {
-  return message?.conversation || message?.extendedTextMessage?.text || '';
-};
 
 // Fungsi untuk menghantar mesej teks
-export async function sendMessage(jid, text) {
-    if (!sock || sock.user?.id === undefined) {
-        console.error('Attempted to send message but WhatsApp socket is not connected.');
-        throw new Error('WhatsApp is not connected. Please check the connection status.');
+export async function sendMessage(userId, jid, text) {
+    const client = clients.get(userId); // Dapatkan client spesifik untuk user
+    if (!client) {
+        console.error(`Attempted to send message for user ${userId} but client is not initialized.`);
+        throw new Error('WhatsApp client is not initialized for this user.');
     }
     try {
-        console.log(`Sending message via service to ${jid}: ${text}`);
-        const sentMessageInfo = await sock.sendMessage(jid, { text: text });
-        console.log('Message sent successfully via service, info:', sentMessageInfo?.key);
-        return sentMessageInfo; // Kembalikan info mesej yang dihantar
+        const chatId = jid.endsWith('@g.us') ? jid : jid.replace(/@c.us$/, '') + '@c.us'; // Pastikan format @c.us
+        console.log(`Sending message via service for user ${userId} to ${chatId}: ${text}`);
+        // client.sendMessage memerlukan chatId, bukan jid penuh? Semak dokumentasi. Ya, perlukan chatId.
+        const sentMessage = await client.sendMessage(chatId, text);
+        console.log(`Message sent successfully via service for user ${userId}, info:`, sentMessage.id._serialized);
+        return sentMessage; // Kembalikan objek mesej yang dihantar
     } catch (error) {
-        console.error(`Error sending message to ${jid} via service:`, error);
-        // Throw ralat semula supaya controller boleh tangkap
-        throw new Error(error.message || 'Failed to send message via WhatsApp service.');
+        console.error(`Error sending message for user ${userId} to ${jid} via service:`, error);
+        throw new Error(error.message || `Failed to send message via WhatsApp service for user ${userId}.`);
     }
 }
 
+// Fungsi untuk menyambung ke WhatsApp
 export async function connectToWhatsApp(userId) {
-  // --- SEMAKAN HAD SAMBUNGAN --- 
-  try {
-      const user = await User.findById(userId);
-      if (!user) {
-          console.error(`Pengguna ${userId} tidak ditemui.`);
-          if (globalIO) globalIO.emit('error_message', 'Pengguna tidak ditemui.');
-          currentUserId = null; // Reset
-          return;
-      }
-
-      const plan = user.membershipPlan || 'Free';
-      const limit = PLAN_LIMITS[plan] || PLAN_LIMITS['default'];
-      
-      // Kira sambungan sedia ada (yang aktif atau pernah cuba disambung)
-      const currentConnectionCount = await WhatsappConnection.countDocuments({ userId });
-      
-      console.log(`Pelan pengguna ${userId}: ${plan}, Had: ${limit}, Sambungan sedia ada: ${currentConnectionCount}`);
-
-      if (currentConnectionCount >= limit) {
-          console.warn(`Had sambungan (${limit}) untuk pengguna ${userId} telah dicapai.`);
-          if (globalIO) {
-              globalIO.emit('whatsapp_status', 'limit_reached');
-              globalIO.emit('error_message', `Had sambungan (${limit}) untuk pelan ${plan} anda telah dicapai.`);
-          }
-           // Kemaskini rekod yang mungkin dalam status connecting/waiting_qr ke limit_reached
-           await WhatsappConnection.updateMany({ userId, status: { $in: ['connecting', 'waiting_qr'] } }, { status: 'limit_reached' });
-          currentUserId = null; // Reset
-          return; // Hentikan proses sambungan
-      }
-
-  } catch (dbError) {
-       console.error("Ralat DB semasa menyemak had sambungan:", dbError);
-       if (globalIO) globalIO.emit('error_message', 'Ralat pelayan semasa menyemak had sambungan.');
-       currentUserId = null; // Reset
-       return;
-  }
-  // --- AKHIR SEMAKAN HAD --- 
-
-  const { state, saveCreds } = await useMultiFileAuthState(`sessions/${userId}`); // Guna folder sesi unik per pengguna
-  
-   // Kemaskini status ke 'connecting' dalam DB
-   // Anggap pengguna hanya cuba sambung 1 nombor pada satu masa (limitasi semasa)
-   try {
-      await WhatsappConnection.findOneAndUpdate(
-           // Cari rekod yang belum bersambung atau tiada rekod langsung (upsert)
-           { userId, status: { $nin: ['connected', 'limit_reached'] } }, 
-           { userId, status: 'connecting', qrCode: null, phoneNumber: 'pending', jid: 'pending' }, // Letak placeholder
-           { upsert: true, new: true, sort: { createdAt: -1 } } // Ambil yg terbaru jika ada > 1 (sepatutnya tidak)
-      );
-       if (globalIO) globalIO.emit('whatsapp_status', 'connecting');
-   } catch(dbError) {
-       console.error("Ralat mengemaskini status DB ke connecting:", dbError);
-       // Teruskan sambungan? Atau berhenti?
-   }
-
-  console.log(`Memulakan sambungan WhatsApp untuk pengguna: ${userId}...`);
-  sock = makeWASocket({ // Cipta instance baru
-    auth: state,
-    printQRInTerminal: false, 
-    browser: ['WaziperV2', 'Chrome', '1.0.0'], 
-  });
-
-  // Listener untuk event sambungan
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    const localUserId = currentUserId; // Ambil userId semasa event berlaku
-
-    if (!localUserId) {
-        console.warn("connection.update diterima tetapi tiada currentUserId. Mengabaikan.");
-        return;
-    }
-
-    let currentStatus = 'disconnected'; // Default status
-    let dbUpdate = {};
-    let emitQR = null;
-
-    if (qr) {
-      console.log(`QR Diterima untuk user ${localUserId}, menghantar ke frontend...`);
-      currentStatus = 'waiting_qr';
-      emitQR = qr;
-      dbUpdate = { status: 'waiting_qr', qrCode: qr };
-    }
-
-    if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error instanceof Boom) &&
-                              lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log(`Sambungan user ${localUserId} terputus disebabkan`, lastDisconnect?.error, ', menyambung semula', shouldReconnect);
-      currentStatus = 'disconnected';
-      dbUpdate = { status: 'disconnected', qrCode: null };
-      emitQR = null;
-      sock = null; // Reset instance global
-      currentUserId = null;
-      // Jangan sambung semula automatik
-    }
-
-    if (connection === 'open') {
-      console.log(`Sambungan WhatsApp user ${localUserId} dibuka!`);
-      currentStatus = 'connected';
-      emitQR = null;
-      const jid = sock?.user?.id;
-      const phoneNumber = jid ? jid.split('@')[0] : 'unknown'; // Dapatkan nombor telefon
-      dbUpdate = { 
-          status: 'connected', 
-          qrCode: null, 
-          jid: jid || 'unknown@c.us',
-          lastConnectedAt: new Date()
-      };
-       // Kemaskini juga phoneNumber jika ia 'pending' atau 'unknown'
-       if (phoneNumber !== 'unknown') {
-           dbUpdate.phoneNumber = phoneNumber;
-       }
-    }
-    
-    // Kemaskini Database
-    try {
-         // Cuba kemaskini rekod yang statusnya bukan disconnected/limit_reached
-         // Ini sepatutnya rekod yang kita cipta/kemaskini semasa 'connecting'
-        const updatedConn = await WhatsappConnection.findOneAndUpdate(
-            { userId: localUserId, status: { $nin: ['disconnected', 'limit_reached'] } }, 
-            { $set: dbUpdate }, 
-            { new: true } // Dapatkan dokumen terkini
-        );
-        if (!updatedConn) {
-             console.warn(`Tidak dapat mencari rekod WhatsappConnection untuk dikemaskini bagi user ${localUserId} dengan status aktif.`);
-             // Jika status semasa adalah connected, cuba cipta/kemaskini berdasarkan JID
-             if (currentStatus === 'connected' && dbUpdate.jid !== 'unknown@c.us') {
-                  await WhatsappConnection.findOneAndUpdate(
-                      { userId: localUserId, jid: dbUpdate.jid },
-                      { $set: dbUpdate },
-                      { upsert: true, new: true }
-                  );
-             }
+    if (clients.has(userId)) {
+        console.log(`Client untuk user ${userId} sudah wujud atau sedang cuba bersambung.`);
+        // Mungkin hantar status semasa jika perlu
+        try {
+           const state = await clients.get(userId).getState();
+           if(globalIO) globalIO.to(userId).emit('whatsapp_status', state || 'connecting');
+        } catch (e) {
+           console.warn(`Gagal dapatkan state client sedia ada untuk user ${userId}: ${e.message}`);
         }
+        return; // Jangan cipta client baru jika sudah ada
+    }
+
+    // --- SEMAKAN HAD SAMBUNGAN ---
+    try {
+        const user = await User.findById(userId);
+        if (!user) {
+            console.error(`Pengguna ${userId} tidak ditemui.`);
+            if (globalIO) globalIO.to(userId).emit('error_message', 'Pengguna tidak ditemui.');
+            return;
+        }
+
+        const plan = user.membershipPlan || 'Free';
+        const limit = PLAN_LIMITS[plan] || PLAN_LIMITS['default'];
+
+        // Kira sambungan yang statusnya 'connected'
+        const currentConnectionCount = await WhatsappConnection.countDocuments({ userId, status: 'connected' });
+
+        console.log(`Pelan pengguna ${userId}: ${plan}, Had: ${limit}, Sambungan aktif: ${currentConnectionCount}`);
+
+        if (currentConnectionCount >= limit) {
+            console.warn(`Had sambungan (${limit}) untuk pengguna ${userId} telah dicapai.`);
+            if (globalIO) {
+                globalIO.to(userId).emit('whatsapp_status', 'limit_reached');
+                globalIO.to(userId).emit('error_message', `Had sambungan (${limit}) untuk pelan ${plan} anda telah dicapai.`);
+            }
+            // Kemaskini rekod yang mungkin dalam status connecting/waiting_qr ke limit_reached
+            await WhatsappConnection.updateMany({ userId, status: { $in: ['connecting', 'waiting_qr'] } }, { status: 'limit_reached' });
+            return; // Hentikan proses sambungan
+        }
+
     } catch (dbError) {
-        console.error(`Ralat mengemaskini status DB kepada ${currentStatus} untuk user ${localUserId}:`, dbError);
-    }
-
-    // Hantar status ke frontend
-    if (globalIO) {
-      globalIO.emit('whatsapp_status', currentStatus);
-      if (emitQR !== undefined) {
-        globalIO.emit('whatsapp_qr', emitQR);
-      }
-    }
-
-  });
-
-  // Listener untuk simpan kredential/sesi
-  sock.ev.on('creds.update', saveCreds);
-
-   // Listener untuk mesej masuk
-   sock.ev.on('messages.upsert', async (m) => {
-     const msgInfo = m.messages[0];
-     if (!msgInfo.message) return;
-     if (msgInfo.key.fromMe) return;
-     
-     // Dapatkan localUserId dari instance sock semasa (lebih selamat)
-     const currentSock = getWhatsAppSocket(); // Guna fungsi getter
-     const localUserId = currentSock?.user?.id ? currentSock.user.id.split(':')[0] : null; // Cuba dapatkan ID dari JID sock
-     // const localUserId = currentUserId; // Guna variabel global mungkin kurang tepat
-     
-     if (!localUserId) {
-         console.log('Tidak dapat menentukan ID pengguna aktif untuk sesi ini, autoresponder diabaikan.');
+         console.error("Ralat DB semasa menyemak had sambungan:", dbError);
+         if (globalIO) globalIO.to(userId).emit('error_message', 'Ralat pelayan semasa menyemak had sambungan.');
          return;
+    }
+    // --- AKHIR SEMAKAN HAD ---
+
+    console.log(`Memulakan sambungan WhatsApp untuk pengguna: ${userId}...`);
+    // Kemaskini status ke 'connecting' dalam DB
+    try {
+        await WhatsappConnection.findOneAndUpdate(
+             // Cari rekod yang sesuai untuk disambungkan (atau cipta baru jika tiada)
+             // Logik ini mungkin perlu disemak semula bergantung pada bagaimana anda mahu handle multiple devices
+             { userId, status: { $nin: ['connected', 'limit_reached'] } }, // Cari yang belum bersambung atau had
+             { userId, status: 'connecting', qrCode: null, phoneNumber: 'pending', jid: 'pending' },
+             { upsert: true, new: true, sort: { createdAt: -1 } }
+        );
+         if (globalIO) globalIO.to(userId).emit('whatsapp_status', 'connecting');
+     } catch(dbError) {
+         console.error(`Ralat mengemaskini status DB ke connecting untuk user ${userId}:`, dbError);
+         // Teruskan?
      }
 
-     const sender = msgInfo.key.remoteJid;
-     const messageText = getMessageText(msgInfo.message);
-     const timestamp = new Date(msgInfo.messageTimestamp * 1000); // Convert Unix timestamp to JS Date
-     const messageId = msgInfo.key.id;
+    // Cipta instance client baru untuk pengguna ini
+    const client = new Client({
+        authStrategy: new LocalAuth({ clientId: userId, dataPath: `sessions` }), // Simpan sesi dalam sessions/userId
+        puppeteer: {
+            // headless: false, // Set false untuk debug jika perlu lihat browser
+             args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                // '--single-process', // Hanya jika perlu
+                '--disable-gpu'
+            ],
+            // executablePath: '/usr/bin/google-chrome-stable' // Tetapkan jika perlu (terutama di Linux)
+        },
+         // Opsyen lain seperti userAgent, dll. boleh ditambah di sini
+         // browser: ['WaziperV2', 'Chrome', '1.0.0'], // wwebjs mungkin ada cara lain utk set User Agent
+    });
 
-     console.log(`Mesej diterima dari ${sender} untuk user ${localUserId}: ${messageText}`);
+    // Simpan client dalam Map
+    clients.set(userId, client);
 
-     // 1. Simpan mesej ke database
-     try {
-         const newMessage = new Message({
-             user: localUserId,
-             chatJid: sender,
-             body: messageText,
-             timestamp: timestamp,
-             fromMe: false,
-             messageId: messageId,
-             status: 'received' // Status mesej diterima
-         });
-         await newMessage.save();
-         console.log(`Received message from ${sender} saved to DB for user ${localUserId}.`);
-     } catch (dbError) {
-         console.error(`Failed to save received message from ${sender} to DB for user ${localUserId}:`, dbError);
-         // Teruskan walaupun gagal simpan DB
-     }
+    // Listener untuk QR Code
+    client.on('qr', async (qr) => {
+        const handlerUserId = client.options.authStrategy.clientId; // Dapatkan userId lagi untuk kepastian
+        console.log(`[${handlerUserId}] Handler client.on('qr') dimasuki.`); // Log masuk
 
-     // 2. Hantar mesej ke frontend melalui Socket.IO
-     if (globalIO) {
-         const messageData = {
-             id: messageId, // Guna ID mesej WA
-             sender: sender,
-             body: messageText,
-             timestamp: timestamp.toISOString(), // Hantar sebagai ISO string
-             fromMe: false
+        try {
+            console.log(`[${handlerUserId}] String QR diterima: ${qr ? qr.substring(0, 50) + '...' : 'null/kosong'}`); // Log permulaan QR
+
+            if (globalIO) {
+                console.log(`[${handlerUserId}] Menghantar whatsapp_status: waiting_qr`);
+                globalIO.to(handlerUserId).emit('whatsapp_status', 'waiting_qr');
+
+                console.log(`[${handlerUserId}] Menghantar whatsapp_qr...`);
+                globalIO.to(handlerUserId).emit('whatsapp_qr', qr);
+                console.log(`[${handlerUserId}] Berjaya menghantar whatsapp_qr.`);
+
+            } else {
+                console.warn(`[${handlerUserId}] globalIO tidak tersedia dalam handler QR.`);
+            }
+
+            console.log(`[${handlerUserId}] Cuba kemaskini status DB ke waiting_qr...`);
+            await WhatsappConnection.updateOne(
+                { userId: handlerUserId, status: 'connecting' },
+                { status: 'waiting_qr', qrCode: qr }
+            );
+            console.log(`[${handlerUserId}] Status DB dikemaskini ke waiting_qr.`);
+
+        } catch (error) {
+            console.error(`[${handlerUserId}] Ralat di dalam handler client.on('qr'):`, error); // Log sebarang ralat dalam handler
+        }
+    });
+
+    // Listener untuk sedia digunakan
+    client.on('ready', async () => {
+        const localUserId = client.options.authStrategy.clientId; // Dapatkan semula userId
+        console.log(`Client WhatsApp untuk user ${localUserId} sedia!`);
+        if (globalIO) {
+            globalIO.to(localUserId).emit('whatsapp_status', 'connected');
+            globalIO.to(localUserId).emit('whatsapp_qr', null); // Kosongkan QR
+        }
+
+        // Dapatkan info pengguna (nombor telefon, dll.)
+        const clientInfo = client.info;
+        const jid = clientInfo.wid._serialized; // JID pengguna (e.g., 60123456789@c.us)
+        const phoneNumber = clientInfo.wid.user; // Nombor telefon (e.g., 60123456789)
+
+        // Kemaskini DB
+        try {
+            await WhatsappConnection.updateOne(
+                // Cari berdasarkan userId dan status 'waiting_qr' ATAU 'connecting' (jika QR tak sempat keluar)
+                { userId: localUserId, status: { $in: ['waiting_qr', 'connecting'] } },
+                {
+                    status: 'connected',
+                    qrCode: null,
+                    jid: jid,
+                    phoneNumber: phoneNumber,
+                    lastConnectedAt: new Date()
+                },
+                 { upsert: false } // Jangan upsert, sepatutnya rekod sudah wujud
+            );
+             console.log(`Status DB dikemaskini ke 'connected' untuk user ${localUserId}`);
+        } catch (dbError) {
+            console.error(`Ralat mengemaskini status DB ke connected untuk user ${localUserId}:`, dbError);
+        }
+    });
+
+    // Listener untuk mesej masuk
+    client.on('message', async (msg) => {
+         const localUserId = client.options.authStrategy.clientId; // Dapatkan semula userId
+         // Abaikan mesej dari diri sendiri atau jika bukan mesej teks biasa (buat masa ini)
+         // Note: msg.fromMe is sometimes unreliable, check msg.id.fromMe
+         if (msg.id.fromMe) {
+             console.log(`Ignoring own message for user ${localUserId}`);
+             return;
          };
-         // Emit ke bilik user yang betul
-         globalIO.to(localUserId).emit('new_whatsapp_message', messageData);
-          console.log(`Emitted new_whatsapp_message to user room: ${localUserId}`);
-     }
+         // Anda mungkin mahu filter jenis mesej lain di sini
 
-     // 3. Logik Autoresponder (sedia ada)
-     try {
-         const settings = await AutoresponderSetting.findOne({ user: localUserId });
-         if (settings && settings.isEnabled) {
-             let replyToSend = null;
-             if (settings.useAI && settings.openaiApiKey && messageText) {
-                 console.log(`AI Autoresponder active for user ${localUserId}. Processing...`);
-                 try {
-                     const openai = new OpenAI({ apiKey: settings.openaiApiKey });
-                     const completion = await openai.chat.completions.create({
-                         model: "gpt-3.5-turbo",
-                         messages: [
-                             { role: "system", content: settings.prompt },
-                             { role: "user", content: messageText }
-                         ],
-                     });
-                     const aiReply = completion.choices[0]?.message?.content;
-                     if (aiReply) {
-                         replyToSend = aiReply;
-                         console.log(`OpenAI Reply: ${replyToSend}`);
-                     } else {
-                         console.log('No reply from OpenAI. Using default if available.');
-                         if (settings.defaultReply) {
-                              replyToSend = processSpintax(settings.defaultReply);
-                              console.log(`Using default reply (spun): ${replyToSend}`);
-                         }
-                     }
-                 } catch (openaiError) {
-                     console.error('OpenAI API error:', openaiError.message);
-                     if (settings.defaultReply) {
-                         replyToSend = processSpintax(settings.defaultReply);
-                         console.log(`Using default reply (spun) after AI error: ${replyToSend}`);
-                     }
-                 }
-             } else if (settings.defaultReply) {
-                 replyToSend = processSpintax(settings.defaultReply);
-                 console.log(`Using default reply (spun): ${replyToSend}`);
-             }
+         const sender = msg.from; // JID pengirim (e.g., 60987654321@c.us or group JID)
+         const messageText = msg.body; // Teks mesej
+         const timestamp = new Date(msg.timestamp * 1000); // Timestamp
+         const messageId = msg.id._serialized; // ID unik mesej (string)
 
-             if (replyToSend && sock) { // Pastikan sock masih wujud
-                  console.log(`Sending auto-reply to ${sender}: ${replyToSend}`);
-                  // Tidak perlu guna fungsi sendMessage() di sini untuk elak infinite loop jika autoresponder balas diri sendiri
-                  await sock.sendMessage(sender, { text: replyToSend });
-                   // Simpan juga mesej auto-reply ke DB?
-                    try {
-                       const autoReplyMessage = new Message({
-                           user: localUserId,
-                           chatJid: sender,
-                           body: replyToSend,
-                           timestamp: new Date(),
-                           fromMe: true,
-                           messageId: `auto-${Date.now()}`, // ID sementara
-                           status: 'sent'
-                       });
-                       await autoReplyMessage.save();
-                   } catch (dbSaveError) {
-                       console.error("Failed to save auto-reply message to DB:", dbSaveError);
-                   }
-             }
-         } else {
-              if (!settings) console.log(`Tiada tetapan autoresponder ditemui untuk pengguna ${localUserId}.`);
-              else if (!settings.isEnabled) console.log(`Autoresponder tidak aktif untuk pengguna ${localUserId}.`);
+         console.log(`Mesej diterima dari ${sender} untuk user ${localUserId}: ${messageText}`);
+
+         // 1. Simpan mesej ke database
+         try {
+             const newMessage = new Message({
+                 user: localUserId,
+                 chatJid: sender,
+                 body: messageText,
+                 timestamp: timestamp,
+                 fromMe: false, // atau msg.id.fromMe? Semak semula
+                 messageId: messageId,
+                 status: 'received'
+             });
+             await newMessage.save();
+             console.log(`Received message from ${sender} saved to DB for user ${localUserId}.`);
+         } catch (dbError) {
+              // Handle duplicate key error (jika mesej sama diterima lagi)
+              if (dbError.code === 11000) {
+                  console.warn(`Message ${messageId} already exists in DB for user ${localUserId}.`);
+              } else {
+                 console.error(`Failed to save received message from ${sender} to DB for user ${localUserId}:`, dbError);
+              }
          }
 
-     } catch (dbError) {
-       console.error('Ralat mendapatkan tetapan autoresponder dari DB:', dbError);
-     }
-   });
+         // 2. Hantar mesej ke frontend melalui Socket.IO
+         if (globalIO) {
+             const messageData = {
+                 id: messageId,
+                 sender: sender,
+                 body: messageText,
+                 timestamp: timestamp.toISOString(),
+                 fromMe: false
+             };
+             globalIO.to(localUserId).emit('new_whatsapp_message', messageData);
+             console.log(`Emitted new_whatsapp_message to user room: ${localUserId}`);
+         }
 
-  console.log(`Listener untuk pengguna ${userId} telah disediakan.`);
+         // 3. Logik Autoresponder
+         try {
+             const settings = await AutoresponderSetting.findOne({ user: localUserId });
+             if (settings && settings.isEnabled) {
+                 let replyToSend = null;
+                 if (settings.useAI && settings.openaiApiKey && messageText) {
+                     console.log(`AI Autoresponder active for user ${localUserId}. Processing...`);
+                     try {
+                         const openai = new OpenAI({ apiKey: settings.openaiApiKey });
+                         const completion = await openai.chat.completions.create({
+                             model: "gpt-3.5-turbo",
+                             messages: [
+                                 { role: "system", content: settings.prompt },
+                                 { role: "user", content: messageText }
+                             ],
+                         });
+                         const aiReply = completion.choices[0]?.message?.content;
+                         if (aiReply) {
+                             replyToSend = aiReply;
+                             console.log(`OpenAI Reply: ${replyToSend}`);
+                         } else {
+                             console.log('No reply from OpenAI. Using default if available.');
+                             if (settings.defaultReply) {
+                                  replyToSend = processSpintax(settings.defaultReply);
+                                  console.log(`Using default reply (spun): ${replyToSend}`);
+                             }
+                         }
+                     } catch (openaiError) {
+                         console.error('OpenAI API error:', openaiError.message);
+                         if (settings.defaultReply) {
+                             replyToSend = processSpintax(settings.defaultReply);
+                             console.log(`Using default reply (spun) after AI error: ${replyToSend}`);
+                         }
+                     }
+                 } else if (settings.defaultReply) {
+                     replyToSend = processSpintax(settings.defaultReply);
+                     console.log(`Using default reply (spun): ${replyToSend}`);
+                 }
+
+                 if (replyToSend) {
+                      console.log(`Sending auto-reply to ${sender}: ${replyToSend}`);
+                      try {
+                          // Guna msg.reply untuk membalas terus ke mesej asal
+                           const sentReply = await msg.reply(replyToSend);
+                           // Simpan juga mesej auto-reply ke DB
+                           try {
+                              const autoReplyMessage = new Message({
+                                  user: localUserId,
+                                  chatJid: sender,
+                                  body: replyToSend,
+                                  timestamp: new Date(sentReply.timestamp * 1000), // Guna timestamp dari balasan
+                                  fromMe: true,
+                                  messageId: sentReply.id._serialized, // Guna ID dari balasan
+                                  status: 'sent'
+                              });
+                              await autoReplyMessage.save();
+                          } catch (dbSaveError) {
+                               if (dbSaveError.code === 11000) {
+                                   console.warn(`Auto-reply message ${sentReply.id._serialized} already exists in DB for user ${localUserId}.`);
+                               } else {
+                                  console.error("Failed to save auto-reply message to DB:", dbSaveError);
+                               }
+                          }
+                      } catch (replyError) {
+                           console.error(`Failed to send auto-reply to ${sender} for user ${localUserId}:`, replyError);
+                      }
+                 }
+             } else {
+                  if (!settings) console.log(`Tiada tetapan autoresponder ditemui untuk pengguna ${localUserId}.`);
+                  else if (!settings.isEnabled) console.log(`Autoresponder tidak aktif untuk pengguna ${localUserId}.`);
+             }
+
+         } catch (dbError) {
+           console.error('Ralat mendapatkan tetapan autoresponder dari DB:', dbError);
+         }
+    });
+
+    // Listener untuk diskonek
+    client.on('disconnected', async (reason) => {
+         const localUserId = client.options.authStrategy.clientId; // Dapatkan semula userId
+         console.log(`Client untuk user ${localUserId} terputus:`, reason);
+         if (globalIO) {
+            globalIO.to(localUserId).emit('whatsapp_status', 'disconnected');
+            globalIO.to(localUserId).emit('whatsapp_qr', null);
+         }
+         // Kemaskini DB
+         try {
+            await WhatsappConnection.updateOne(
+                { userId: localUserId, status: 'connected' }, // Cari yang sedang connected
+                { status: 'disconnected', qrCode: null }
+            );
+         } catch (dbError) {
+             console.error(`Ralat mengemaskini status DB ke disconnected untuk user ${localUserId}:`, dbError);
+         }
+
+         // Hapus client dari Map
+         clients.delete(localUserId);
+         console.log(`Client instance for user ${localUserId} removed.`);
+          // Cuba bersihkan sesi jika perlu (terutama jika reason = 'LOGGED_OUT')
+          // Mungkin perlu hapus folder sessions/localUserId?
+          if (reason === 'LOGGED_OUT' || reason === 'NAVIGATION') { // 'NAVIGATION' maybe indicates unrecoverable state
+               console.log(`Reason is ${reason}, attempting to clear session for ${localUserId}`);
+               // Anda mungkin mahu menambah logik untuk menghapus folder sesi di sini
+               // const sessionPath = path.join(__dirname, 'sessions', localUserId);
+               // fs.rm(sessionPath, { recursive: true, force: true }, (err) => {...});
+          }
+
+    });
+
+    // Listener untuk ralat pengesahan
+    client.on('auth_failure', async (msg) => {
+         const localUserId = client.options.authStrategy.clientId; // Cuba dapatkan userId jika boleh
+         console.error(`Kegagalan Pengesahan untuk user ${localUserId || 'unknown'}:`, msg);
+          if (localUserId && globalIO) {
+            globalIO.to(localUserId).emit('whatsapp_status', 'auth_failure');
+            globalIO.to(localUserId).emit('error_message', `Authentication failed: ${msg}. Please try reconnecting.`);
+            globalIO.to(localUserId).emit('whatsapp_qr', null);
+         }
+          // Kemaskini DB ke status error atau disconnected
+          if (localUserId) {
+              try {
+                  await WhatsappConnection.updateOne(
+                      { userId: localUserId },
+                      { status: 'disconnected', qrCode: null } // Atau 'error'
+                  );
+              } catch (dbError) {
+                  console.error(`Ralat mengemaskini status DB ke disconnected (auth fail) untuk user ${localUserId}:`, dbError);
+              }
+              // Hapus client dari Map
+              clients.delete(localUserId);
+              console.log(`Client instance for user ${localUserId} removed due to auth failure.`);
+          }
+    });
+
+     // Listener untuk ralat umum lain (jika ada)
+     client.on('error', (err) => {
+         const localUserId = client.options.authStrategy.clientId;
+         console.error(`Ralat pada client user ${localUserId}:`, err);
+         // Mungkin perlu handle spesifik berdasarkan jenis ralat
+     });
+
+
+    // Mulakan proses inisialisasi client
+    client.initialize().catch(err => {
+        console.error(`Gagal menginisialisasi client untuk user ${userId}:`, err);
+         // Pastikan client dihapus jika gagal initialize
+         clients.delete(userId);
+         // Kemaskini status DB ke disconnected/error
+          try {
+             WhatsappConnection.updateOne({ userId, status: 'connecting' }, { status: 'disconnected' });
+          } catch(dbErr) {/* ignore */}
+        if (globalIO) {
+            globalIO.to(userId).emit('whatsapp_status', 'disconnected');
+             globalIO.to(userId).emit('error_message', `Failed to initialize WhatsApp connection: ${err.message}`);
+        }
+    });
+
+    console.log(`Listener untuk pengguna ${userId} telah disediakan.`);
 }
 
 // Terima userId semasa initialize
@@ -337,79 +422,122 @@ export function initializeWhatsAppService(io) {
   console.log('Servis WhatsApp diinisialisasi dengan Socket.IO');
 
   io.on('connection', (socket) => {
-    console.log('Pengguna Frontend bersambung [WhatsApp Service]:', socket.id);
+    const userId = socket.handshake.query.userId; // Dapatkan userId dari query semasa sambungan socket.io
+    if (userId) {
+        socket.join(userId); // Sertai bilik berdasarkan userId
+        console.log(`Pengguna Frontend ${socket.id} (User ID: ${userId}) bersambung dan menyertai bilik.`);
 
-    // Hantar status semasa jika ada instance aktif (perlu ditambah baik)
-    if (sock && currentUserId) {
-         // Dapatkan status dari DB untuk kepastian?
-         WhatsappConnection.findOne({ userId: currentUserId, status: 'connected' }).then(conn => {
-             if (conn) socket.emit('whatsapp_status', 'connected');
-         });
+        // Hantar status semasa untuk pengguna ini jika client wujud
+        const client = clients.get(userId);
+        if (client) {
+            client.getState().then(state => {
+                 socket.emit('whatsapp_status', state || 'connecting'); // Hantar state semasa
+                 // Jika state waiting_qr, cuba hantar QR lagi? Perlu QR disimpan? Ya, dari DB.
+                 if (state === 'waiting_qr') {
+                      WhatsappConnection.findOne({ userId, status: 'waiting_qr' }).then(conn => {
+                          if (conn && conn.qrCode) {
+                              socket.emit('whatsapp_qr', conn.qrCode);
+                          }
+                      });
+                 }
+            }).catch(e => {
+                 console.warn(`Tidak dapat get state client untuk user ${userId}: ${e.message}`);
+                 // Mungkin hantar status dari DB sebagai fallback?
+                 WhatsappConnection.findOne({ userId }).sort({createdAt: -1}).then(conn => {
+                      socket.emit('whatsapp_status', conn?.status || 'disconnected');
+                 });
+            });
+        } else {
+            // Jika client tiada, hantar status dari DB
+             WhatsappConnection.findOne({ userId }).sort({createdAt: -1}).then(conn => {
+                 socket.emit('whatsapp_status', conn?.status || 'disconnected');
+             });
+        }
+    } else {
+         console.log(`Pengguna Frontend ${socket.id} bersambung tanpa userId.`);
     }
 
-    socket.on('whatsapp_connect_request', async (userId) => {
-      console.log(`Terima whatsapp_connect_request untuk user: ${userId}`);
-      if (sock && currentUserId && currentUserId !== userId) {
-           console.log("Instance lain sedang aktif untuk pengguna berbeza. Menolak.");
-           socket.emit('error_message', 'Pelayan sedang menguruskan sambungan lain. Sila cuba sebentar lagi.');
+
+    socket.on('whatsapp_connect_request', async (reqUserId) => {
+      console.log(`Terima whatsapp_connect_request untuk user: ${reqUserId} dari socket ${socket.id}`);
+      // Pastikan reqUserId sepadan dengan userId socket ini
+      if (!userId || userId !== reqUserId) {
+           console.warn(`Mismatch userId: socket user ${userId}, request user ${reqUserId}. Menolak.`);
+           socket.emit('error_message', 'User ID mismatch.');
            return;
-      } else if (sock && currentUserId === userId) {
-          console.log("Instance untuk pengguna ini sudah ada. Mungkin cuba sambung semula?");
-          // Hantar status semasa atau QR jika ada
-          const existingConn = await WhatsappConnection.findOne({ userId, status: { $in: ['connecting', 'waiting_qr'] } });
-          if (existingConn) {
-              socket.emit('whatsapp_status', existingConn.status);
-              if (existingConn.status === 'waiting_qr') {
-                  socket.emit('whatsapp_qr', existingConn.qrCode);
-              }
-          } else {
-              // Mungkin perlu trigger connectToWhatsApp lagi jika status disconnected
-          }
-          return;
       }
-       currentUserId = userId; // Tetapkan pengguna semasa
+       // Tidak perlu semak client lain sebab kita guna Map based on userId
+       // if (clients.has(userId)) -> semakan ini sudah ada di connectToWhatsApp
        await connectToWhatsApp(userId);
     });
 
-    socket.on('whatsapp_disconnect_request', async () => {
-      console.log('Terima whatsapp_disconnect_request');
-      if (sock && currentUserId) {
+    socket.on('whatsapp_disconnect_request', async (reqUserId) => {
+      console.log(`Terima whatsapp_disconnect_request untuk user ${reqUserId} dari socket ${socket.id}`);
+       // Pastikan reqUserId sepadan dengan userId socket ini
+      if (!userId || userId !== reqUserId) {
+           console.warn(`Mismatch userId: socket user ${userId}, request user ${reqUserId}. Menolak.`);
+           socket.emit('error_message', 'User ID mismatch.');
+           return;
+      }
+
+      const client = clients.get(userId);
+      if (client) {
         try {
-           await sock.logout(); // Ini akan trigger 'connection.update' dengan close
-           console.log('Berjaya logout.');
+           console.log(`Melakukan logout untuk client user ${userId}...`);
+           await client.logout(); // Ini akan trigger event 'disconnected'
+           // Event 'disconnected' akan handle pembersihan client dan kemaskini DB
+           console.log(`Logout dipanggil untuk user ${userId}. Menunggu event disconnected...`);
         } catch (error) {
-             console.error('Ralat semasa logout paksa:', error);
-             // Mungkin perlu kemaskini DB secara manual di sini jika logout gagal
-             await WhatsappConnection.updateMany({ userId: currentUserId, status: { $ne: 'disconnected' } }, { status: 'disconnected', qrCode: null });
-             if(globalIO) globalIO.to(socket.id).emit('whatsapp_status', 'disconnected'); // Hantar terus ke peminta
-        } finally {
-             sock = null;
-             currentUserId = null;
+             console.error(`Ralat semasa memanggil logout untuk user ${userId}:`, error);
+             // Cuba kemaskini DB secara manual jika logout gagal teruk
+             try {
+                 await WhatsappConnection.updateOne({ userId, status: { $ne: 'disconnected' } }, { status: 'disconnected', qrCode: null });
+                 if(globalIO) globalIO.to(userId).emit('whatsapp_status', 'disconnected');
+             } catch (dbErr) { /* ignore */ }
+             // Hapus client dari Map secara manual
+             clients.delete(userId);
         }
       } else {
-        console.log('Tiada sambungan aktif untuk diputuskan.');
+        console.log(`Tiada sambungan aktif untuk diputuskan bagi user ${userId}.`);
+        // Pastikan status DB betul
+         try {
+             await WhatsappConnection.updateOne({ userId, status: { $ne: 'disconnected' } }, { status: 'disconnected', qrCode: null });
+         } catch(dbErr) {/* ignore */}
         socket.emit('whatsapp_status', 'disconnected');
       }
     });
 
     socket.on('disconnect', () => {
-      console.log('Pengguna Frontend terputus [WhatsApp Service]:', socket.id);
-      // Jangan putuskan sambungan Baileys secara automatik
+       if (userId) {
+          console.log(`Pengguna Frontend ${socket.id} (User ID: ${userId}) terputus.`);
+          socket.leave(userId); // Keluar dari bilik
+       } else {
+           console.log(`Pengguna Frontend ${socket.id} (tanpa userId) terputus.`);
+       }
+      // Jangan putuskan sambungan WhatsApp secara automatik
     });
   });
 }
 
-// Fungsi untuk dapatkan instance sock (mungkin perlu diubah suai untuk multi-instance)
-export function getWhatsAppSocket() {
-  return sock;
+// Fungsi untuk dapatkan instance client WhatsApp yang aktif untuk user ID tertentu
+export function getWhatsAppSocket(userId) {
+  return clients.get(userId); // Kembalikan client dari Map
 }
 
-// Buang blok export di bawah ini
-/*
-export {
-    connectToWhatsApp,
-    sendMessage, 
-    initializeWhatsAppService,
-    // getWhatsAppSocket 
-}; 
-*/ 
+// Fungsi untuk membersihkan semua sesi client (cth: semasa server shutdown)
+export async function cleanupWhatsAppClients() {
+    console.log("Membersihkan semua client WhatsApp...");
+    const cleanupPromises = [];
+    for (const [userId, client] of clients.entries()) {
+        console.log(`Menghancurkan client untuk user ${userId}...`);
+        cleanupPromises.push(client.destroy().catch(e => console.error(`Gagal destroy client ${userId}: ${e.message}`)));
+        // Kita mungkin tidak perlu kemaskini DB di sini kerana server sedang shutdown
+    }
+    await Promise.all(cleanupPromises);
+    clients.clear();
+    console.log("Semua client WhatsApp telah dibersihkan.");
+}
+
+// Pastikan cleanup dijalankan semasa server berhenti
+process.on('SIGINT', cleanupWhatsAppClients);
+process.on('SIGTERM', cleanupWhatsAppClients); 

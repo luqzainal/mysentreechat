@@ -51,7 +51,9 @@ function DashboardPage() {
         socket.disconnect();
     }
     console.log("Attempting to connect socket...");
-    socket = io(SOCKET_SERVER_URL);
+    socket = io(SOCKET_SERVER_URL, { 
+        query: { userId: user._id }
+    });
     socket.on('connect', () => {
       console.log('Socket.IO Connected, ID:', socket.id);
       setSocketConnected(true);
@@ -254,29 +256,29 @@ function DashboardPage() {
               <div className="flex space-x-4">
                 {connectionStatus === 'disconnected' && (
                   <Button size="sm" onClick={handleConnectRequest} disabled={!socketConnected || !user?._id}>
-                     <LinkIcon className="mr-2 h-4 w-4" /> Sambung / Imbas Semula
+                     <LinkIcon className="mr-2 h-4 w-4" /> Connect / Re-Connect
                   </Button>
                 )}
                 {connectionStatus === 'connected' && (
                    <Button size="sm" variant="destructive" onClick={handleDisconnectRequest} disabled={!socketConnected}>
-                     <WifiOff className="mr-2 h-4 w-4" /> Putuskan Sambungan
+                     <WifiOff className="mr-2 h-4 w-4" /> Disconnect
                   </Button>
                 )}
                 {connectionStatus !== 'connected' && connectionStatus !== 'disconnected' && connectionStatus !== 'waiting_qr' && connectionStatus !== 'Connecting...' && socketConnected && (
                      <Button size="sm" onClick={handleConnectRequest} disabled={!user?._id}>
-                         <LinkIcon className="mr-2 h-4 w-4" /> Cuba Sambung
+                         <LinkIcon className="mr-2 h-4 w-4" /> Re-Connect
                      </Button>
                 )}
               </div>
                {!socketConnected && connectionStatus !== 'User not loaded' && (
-                    <p className="text-xs text-red-500">Sambungan ke pelayan terputus. Cuba muat semula halaman.</p>
+                    <p className="text-xs text-red-500">Connection to server lost. Please reload the page.</p>
                 )}
             </CardContent>
           </Card>
        </div>
 
       <p className="text-muted-foreground">
-        Urus semua keperluan WhatsApp anda dari sini.
+        Manage all your WhatsApp needs from here.
       </p>
 
       {/* Grid Kad Modul */}
@@ -294,7 +296,7 @@ function DashboardPage() {
               </CardContent>
                <div className="p-4 pt-0 text-right">
                  <Link to={module.link} className="text-sm font-medium text-primary hover:underline inline-flex items-center">
-                   Pergi ke Modul <ArrowRight className="ml-1 h-4 w-4" />
+                   Go to Module <ArrowRight className="ml-1 h-4 w-4" />
                  </Link>
                </div>
             </Card>

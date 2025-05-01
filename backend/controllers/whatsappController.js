@@ -1,8 +1,7 @@
 import Contact from '../models/Contact.js';
 import Message from '../models/Message.js'; // <-- Import model Message
 // import { sock } from '../services/whatsappService.js'; // Buang import sock
-import { getWhatsAppSocket } from '../services/whatsappService.js';
-import { sendMessage as sendWhatsappMessage } from '../services/whatsappService.js'; // Import & rename secara berasingan
+import { getWhatsAppSocket, sendMessage as sendWhatsappMessage } from '../services/whatsappService.js';
 import { processSpintax } from '../utils/spintaxUtils.js'; // Import fungsi spintax
 
 // Fungsi helper untuk format nombor ke JID WhatsApp
@@ -27,11 +26,22 @@ const sendBulkMessage = async (req, res) => {
     return res.status(400).json({ message: 'Message and at least one contact ID are required.' });
   }
 
-  const currentSock = getWhatsAppSocket();
+  // Dapatkan client untuk user ini
+  const client = getWhatsAppSocket(userId);
 
-  if (!currentSock || currentSock.user?.id === undefined) { 
-     return res.status(400).json({ message: 'WhatsApp connection is not active. Please connect on the Dashboard.' });
+  if (!client) {
+     // Cuba semak status dari DB juga?
+     return res.status(400).json({ message: 'WhatsApp connection is not active for this user. Please connect on the Dashboard.' });
   }
+  // Semakan state client (jika perlu, tapi service sepatutnya handle ralat jika tak connected)
+  // try {
+  //   const state = await client.getState();
+  //   if (state !== 'CONNECTED') {
+  //        return res.status(400).json({ message: `WhatsApp is not connected (state: ${state}). Please check the Dashboard.` });
+  //   }
+  // } catch (e) {
+  //     return res.status(500).json({ message: 'Could not verify WhatsApp connection state.' });
+  // }
 
   try {
     const contacts = await Contact.find({ 
@@ -53,8 +63,8 @@ const sendBulkMessage = async (req, res) => {
         const spunMessage = processSpintax(message);
         console.log(`Sending bulk message (spun) to ${contact.name} (${targetJid}): ${spunMessage}`);
         
-        // Guna fungsi dari service
-        await sendWhatsappMessage(targetJid, spunMessage);
+        // Guna fungsi dari service, hantar userId juga
+        await sendWhatsappMessage(userId, targetJid, spunMessage);
         results.push({ name: contact.name, number: contact.phoneNumber, status: 'Success' });
         successCount++;
       } catch (error) {
@@ -132,19 +142,19 @@ const sendMessage = async (req, res) => {
   const targetJid = formatToJid(to);
 
   try {
-    // Guna fungsi dari whatsappService
-    const sentMessageInfo = await sendWhatsappMessage(targetJid, message);
+    // Guna fungsi dari whatsappService, hantar userId
+    const sentMessage = await sendWhatsappMessage(userId, targetJid, message);
     
-    // Selepas berjaya hantar, simpan ke database (jika perlu)
+    // Selepas berjaya hantar, simpan ke database
      try {
          const newMessage = new Message({
              user: userId,
              chatJid: targetJid,
              body: message,
-             timestamp: new Date(), // Guna timestamp semasa
+             timestamp: new Date(sentMessage.timestamp * 1000), // Guna timestamp dari mesej dihantar
              fromMe: true,
-             messageId: sentMessageInfo?.key?.id, // Simpan ID mesej WhatsApp jika ada
-             status: 'sent' // Status mesej
+             messageId: sentMessage.id._serialized, // Guna ID dari whatsapp-web.js
+             status: 'sent'
          });
          await newMessage.save();
          console.log(`Sent message to ${targetJid} saved to DB.`);
@@ -154,7 +164,7 @@ const sendMessage = async (req, res) => {
          // tapi mungkin log atau hantar notifikasi
      }
 
-    res.status(200).json({ message: 'Message sent successfully.', messageId: sentMessageInfo?.key?.id });
+    res.status(200).json({ message: 'Message sent successfully.', messageId: sentMessage.id._serialized });
 
   } catch (error) {
     console.error(`Error sending message to ${targetJid}:`, error);
