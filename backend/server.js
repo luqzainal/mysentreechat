@@ -48,6 +48,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/autoresponder', autoresponderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/media', mediaRoutes);
 
 // Panggil initialize WhatsApp Service selepas io dicipta
 initializeWhatsAppService(io); // <-- Boleh uncomment ini sekarang

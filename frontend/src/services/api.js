@@ -5,7 +5,7 @@ const api = axios.create({
   // Tetapkan baseURL kepada alamat backend API anda
   // Pastikan ia sepadan dengan port backend anda (default: 5000 jika tiada .env)
   // Tambah /api pada akhir baseURL
-  baseURL: 'http://localhost:5000/api', 
+  baseURL: 'http://localhost:5000/', 
   headers: {
     'Content-Type': 'application/json',
   },

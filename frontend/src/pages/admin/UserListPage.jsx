@@ -33,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Pencil, ShieldCheck, UserX } from 'lucide-react'; // Import ikon baru
+import { Pencil, ShieldCheck, UserX } from 'lucide-react'; // Import new icons
 import {
   AlertDialog,
   AlertDialogContent,
@@ -43,43 +43,44 @@ import {
   AlertDialogTitle,
   AlertDialogCancel,
   AlertDialogAction,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 const UserListPage = () => {
     const [users, setUsers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
-    const { user: loggedInUser } = useAuth(); // Namakan semula user dari context
+    const { user: loggedInUser } = useAuth(); // Rename user from context
 
-    // State untuk dialog edit pelan
+    // State for edit plan dialog
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [selectedUserForEdit, setSelectedUserForEdit] = useState(null);
     const [newPlanForSelectedUser, setNewPlanForSelectedUser] = useState('');
     const [isUpdatingPlan, setIsUpdatingPlan] = useState(false);
 
-    // State untuk dialog ubah peranan (guna AlertDialog)
+    // State for change role dialog (using AlertDialog)
     const [isRoleAlertOpen, setIsRoleAlertOpen] = useState(false);
     const [userForRoleChange, setUserForRoleChange] = useState(null);
-    const [newRoleForChange, setNewRoleForChange] = useState(null); // 'admin' atau 'user'
+    const [newRoleForChange, setNewRoleForChange] = useState(null); // 'admin' or 'user'
     const [isUpdatingRole, setIsUpdatingRole] = useState(false);
 
-    // Fungsi untuk dapatkan token (tidak diperlukan jika interceptor berfungsi)
+    // Function to get token (not needed if interceptor works)
     // const getToken = () => { ... };
 
-    // Fetch users (guna instance api)
+    // Fetch users (use api instance)
     useEffect(() => {
         const fetchUsers = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                // Token ditambah oleh interceptor
+                // Token added by interceptor
                 const { data } = await api.get('/admin/users');
                 setUsers(data);
             } catch (err) {
-                console.error("Ralat mendapatkan senarai pengguna:", err);
-                const message = err.response?.data?.message || "Gagal mendapatkan senarai pengguna.";
+                console.error("Error getting user list:", err); // Translate error log
+                const message = err.response?.data?.message || "Failed to get user list."; // Translate error message
                 setError(message);
-                toast.error(message);
+                toast.error(message); // Translate toast message
             } finally {
                 setIsLoading(false);
             }
@@ -88,59 +89,59 @@ const UserListPage = () => {
         if (loggedInUser?.role === 'admin') {
              fetchUsers();
         } else if (loggedInUser) { 
-            setError('Akses tidak dibenarkan.');
+            setError('Access denied.'); // Translate error message
             setIsLoading(false);
         }
     }, [loggedInUser]);
 
-    // Fungsi untuk membuka dialog edit
+    // Function to open edit dialog
     const handleOpenEditDialog = (userToEdit) => {
         setSelectedUserForEdit(userToEdit);
-        setNewPlanForSelectedUser(userToEdit.membershipPlan || 'Free'); // Set nilai awal Select
+        setNewPlanForSelectedUser(userToEdit.membershipPlan || 'Free'); // Set initial Select value
         setIsEditDialogOpen(true);
     };
 
-    // Fungsi untuk mengemaskini pelan pengguna
+    // Function to update user plan
     const handleUpdatePlan = async () => {
         if (!selectedUserForEdit || !newPlanForSelectedUser) return;
 
         setIsUpdatingPlan(true);
         try {
-            // Token ditambah oleh interceptor
+            // Token added by interceptor
             const { data: updatedUser } = await api.put(
                 `/admin/users/${selectedUserForEdit._id}/plan`,
-                { plan: newPlanForSelectedUser } // Hantar pelan baru dalam body
+                { plan: newPlanForSelectedUser } // Send new plan in body
             );
 
-            // Kemaskini senarai pengguna dalam state
+            // Update user list in state
             setUsers(prevUsers => 
                 prevUsers.map(u => 
                     u._id === updatedUser._id ? updatedUser : u
                 )
             );
 
-            toast.success(`Pelan untuk ${updatedUser.name} berjaya dikemaskini kepada ${updatedUser.membershipPlan}.`);
-            setIsEditDialogOpen(false); // Tutup dialog
+            toast.success(`Plan for ${updatedUser.name} updated successfully to ${updatedUser.membershipPlan}.`); // Translate toast message
+            setIsEditDialogOpen(false); // Close dialog
 
         } catch (err) {
-            console.error("Ralat mengemaskini pelan pengguna:", err);
-            const message = err.response?.data?.message || "Gagal mengemaskini pelan.";
-            toast.error(message);
+            console.error("Error updating user plan:", err); // Translate error log
+            const message = err.response?.data?.message || "Failed to update plan."; // Translate error message
+            toast.error(message); // Translate toast message
         } finally {
             setIsUpdatingPlan(false);
         }
     };
 
-    // Fungsi untuk membuka dialog pengesahan ubah peranan
+    // Function to open role change confirmation dialog
     const handleOpenRoleChangeAlert = (userToChange) => {
         setUserForRoleChange(userToChange);
-        // Tentukan role baru berdasarkan role semasa
+        // Determine new role based on current role
         const targetRole = userToChange.role === 'user' ? 'admin' : 'user'; 
         setNewRoleForChange(targetRole);
         setIsRoleAlertOpen(true);
     };
 
-    // Fungsi untuk mengemaskini peranan pengguna
+    // Function to update user role
     const handleConfirmRoleChange = async () => {
         if (!userForRoleChange || !newRoleForChange) return;
 
@@ -148,25 +149,25 @@ const UserListPage = () => {
         try {
             const { data: updatedUser } = await api.put(
                 `/admin/users/${userForRoleChange._id}/role`,
-                { role: newRoleForChange } // Hantar role baru dalam body
+                { role: newRoleForChange } // Send new role in body
             );
 
-            // Kemaskini senarai pengguna dalam state
+            // Update user list in state
             setUsers(prevUsers => 
                 prevUsers.map(u => 
                     u._id === updatedUser._id ? updatedUser : u
                 )
             );
 
-            toast.success(`Peranan untuk ${updatedUser.name} berjaya ditukar kepada ${updatedUser.role}.`);
-            setIsRoleAlertOpen(false); // Tutup alert dialog
+            toast.success(`Role for ${updatedUser.name} successfully changed to ${updatedUser.role}.`); // Translate toast message
+            setIsRoleAlertOpen(false); // Close alert dialog
             setUserForRoleChange(null);
             setNewRoleForChange(null);
 
         } catch (err) {
-            console.error("Ralat menukar peranan pengguna:", err);
-            const message = err.response?.data?.message || "Gagal menukar peranan.";
-            toast.error(message);
+            console.error("Error changing user role:", err); // Translate error log
+            const message = err.response?.data?.message || "Failed to change role."; // Translate error message
+            toast.error(message); // Translate toast message
         } finally {
             setIsUpdatingRole(false);
         }
@@ -183,43 +184,43 @@ const UserListPage = () => {
     const getPlanBadgeVariant = (plan) => {
         switch (plan?.toLowerCase()) {
             case 'free': return 'outline';
-            case 'basic': return 'default'; // Guna default untuk Basic
-            case 'pro': return 'success'; // Guna success untuk Pro (pastikan warna success ada)
+            case 'basic': return 'default'; // Use default for Basic
+            case 'pro': return 'success'; // Use success for Pro (ensure success color exists)
             default: return 'secondary';
         }
     };
 
     if (isLoading) {
-        return <div className="container mx-auto p-4">Memuatkan senarai pengguna...</div>;
+        return <div className="container mx-auto p-4">Loading user list...</div>; // Translate loading text
     }
 
     if (error) {
         return (
             <div className="container mx-auto p-4">
                 <Alert variant="destructive">
-                    <AlertTitle>Ralat</AlertTitle>
+                    <AlertTitle>Error</AlertTitle> {/* Translate title */}
                     <AlertDescription>{error}</AlertDescription>
                 </Alert>
             </div>
         );
     }
 
-    // Pelan yang dibenarkan untuk pilihan
-    const allowedPlans = ['Free', 'Basic', 'Pro']; // Sesuaikan dengan pelan anda
+    // Allowed plans for selection
+    const allowedPlans = ['Free', 'Basic', 'Pro']; // Adjust with your plans
 
     return (
         <div className="container mx-auto p-4 space-y-6">
-            <h1 className="text-3xl font-bold">Pengurusan Pengguna</h1>
+            <h1 className="text-3xl font-bold">User Management</h1> {/* Translate heading */}
 
             <Table>
                 <TableHeader>
                     <TableRow>
-                        <TableHead>Nama</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Peranan</TableHead>
-                        <TableHead>Pelan</TableHead>
-                        <TableHead>Tarikh Daftar</TableHead>
-                        <TableHead className="text-right">Tindakan</TableHead>
+                        <TableHead>Name</TableHead> {/* Translate table header */}
+                        <TableHead>Email</TableHead> {/* Translate table header */}
+                        <TableHead>Role</TableHead> {/* Translate table header */}
+                        <TableHead>Plan</TableHead> {/* Translate table header */}
+                        <TableHead>Registration Date</TableHead> {/* Translate table header */}
+                        <TableHead className="text-right">Actions</TableHead> {/* Translate table header */}
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -235,115 +236,112 @@ const UserListPage = () => {
                                     <Badge variant={getPlanBadgeVariant(u.membershipPlan)}>{u.membershipPlan || 'N/A'}</Badge>
                                 </TableCell>
                                 <TableCell>
-                                    {format(new Date(u.createdAt), 'dd/MM/yyyy HH:mm')}
+                                    {/* Format date in English locale */} 
+                                    {format(new Date(u.createdAt), 'PPpp')} 
                                 </TableCell>
                                 <TableCell className="text-right space-x-2">
-                                   <Button 
-                                        variant="outline" 
-                                        size="sm" 
-                                        onClick={() => handleOpenEditDialog(u)}
-                                        disabled={u.role === 'admin'}
-                                    >
-                                       <Pencil className="h-4 w-4 mr-1" /> Tukar Pelan
-                                   </Button>
+                                   {/* Edit Plan Button */} 
+                                   <Dialog open={isEditDialogOpen && selectedUserForEdit?._id === u._id} onOpenChange={(isOpen) => {
+                                        if (!isOpen) {
+                                            setIsEditDialogOpen(false);
+                                            setSelectedUserForEdit(null);
+                                        }
+                                    }}>
+                                        <DialogTrigger asChild>
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                onClick={() => handleOpenEditDialog(u)}
+                                                disabled={u.role === 'admin'} // Disable plan change for admins
+                                            >
+                                               <Pencil className="h-4 w-4 mr-1" /> Change Plan {/* Translate button text */}
+                                           </Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="sm:max-w-[425px]">
+                                            <DialogHeader>
+                                                <DialogTitle>Edit User Plan</DialogTitle> {/* Translate dialog title */}
+                                                <DialogDescription>
+                                                    Change the membership plan for {selectedUserForEdit?.name}.
+                                                </DialogDescription> {/* Translate dialog description */}
+                                            </DialogHeader>
+                                            <div className="grid gap-4 py-4">
+                                                <div className="grid grid-cols-4 items-center gap-4">
+                                                    <Label htmlFor="plan-select" className="text-right">Plan</Label> {/* Translate label */}
+                                                    <Select 
+                                                        value={newPlanForSelectedUser}
+                                                        onValueChange={setNewPlanForSelectedUser}
+                                                        disabled={isUpdatingPlan}
+                                                    >
+                                                        <SelectTrigger id="plan-select" className="col-span-3">
+                                                            <SelectValue placeholder="Select a plan" /> {/* Translate placeholder */}
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {allowedPlans.map(plan => (
+                                                                <SelectItem key={plan} value={plan}>{plan}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            </div>
+                                            <DialogFooter>
+                                                 <DialogClose asChild>
+                                                     <Button type="button" variant="secondary" disabled={isUpdatingPlan}>Cancel</Button> {/* Translate button */}
+                                                 </DialogClose>
+                                                <Button onClick={handleUpdatePlan} disabled={isUpdatingPlan || newPlanForSelectedUser === selectedUserForEdit?.membershipPlan}>
+                                                    {isUpdatingPlan ? 'Updating...' : 'Update Plan'} {/* Translate button text */}
+                                                </Button>
+                                            </DialogFooter>
+                                        </DialogContent>
+                                    </Dialog>
                                    
-                                   {loggedInUser?._id !== u._id && (
-                                       <Button 
-                                            variant={u.role === 'user' ? "default" : "destructive"} 
-                                            size="sm" 
-                                            onClick={() => handleOpenRoleChangeAlert(u)}
-                                        >
-                                           {u.role === 'user' ? 
-                                               <><ShieldCheck className="h-4 w-4 mr-1" /> Lantik Admin</> : 
-                                               <><UserX className="h-4 w-4 mr-1" /> Turunkan Pangkat</>
-                                           }
-                                       </Button>
+                                   {/* Change Role Button/Alert Trigger */}
+                                   {loggedInUser?._id !== u._id && ( // Cannot change own role
+                                       <AlertDialog open={isRoleAlertOpen && userForRoleChange?._id === u._id} onOpenChange={(isOpen) => {
+                                            if (!isOpen) {
+                                                setIsRoleAlertOpen(false);
+                                                setUserForRoleChange(null);
+                                                setNewRoleForChange(null);
+                                            }
+                                        }}>
+                                           <AlertDialogTrigger asChild>
+                                                <Button 
+                                                    variant={u.role === 'admin' ? "secondary" : "destructive"} // Button style changes based on action
+                                                    size="sm" 
+                                                    onClick={() => handleOpenRoleChangeAlert(u)}
+                                                >
+                                                    {u.role === 'admin' ? 
+                                                        <><UserX className="h-4 w-4 mr-1" /> Revoke Admin</> // Translate button text
+                                                        : <><ShieldCheck className="h-4 w-4 mr-1" /> Make Admin</> // Translate button text
+                                                    }
+                                                </Button>
+                                           </AlertDialogTrigger>
+                                           <AlertDialogContent>
+                                               <AlertDialogHeader>
+                                                   <AlertDialogTitle>Confirm Role Change</AlertDialogTitle> {/* Translate dialog title */}
+                                                   <AlertDialogDescription>
+                                                       Are you sure you want to change the role of {userForRoleChange?.name} to {newRoleForChange}? 
+                                                       {newRoleForChange === 'admin' ? ' They will gain administrative privileges.' : ' Their administrative privileges will be revoked.'} 
+                                                   </AlertDialogDescription> {/* Translate dialog description */}
+                                               </AlertDialogHeader>
+                                               <AlertDialogFooter>
+                                                   <AlertDialogCancel disabled={isUpdatingRole}>Cancel</AlertDialogCancel> {/* Translate button */}
+                                                   <AlertDialogAction onClick={handleConfirmRoleChange} disabled={isUpdatingRole} className={newRoleForChange === 'admin' ? "" : "bg-destructive text-destructive-foreground hover:bg-destructive/90"}>
+                                                        {isUpdatingRole ? 'Updating...' : 'Confirm Change'} {/* Translate button text */}
+                                                   </AlertDialogAction>
+                                               </AlertDialogFooter>
+                                           </AlertDialogContent>
+                                       </AlertDialog>
                                    )}
                                 </TableCell>
                             </TableRow>
                         ))
                     ) : (
                         <TableRow>
-                            <TableCell colSpan={6} className="text-center">Tiada pengguna ditemui.</TableCell>
+                            <TableCell colSpan={6} className="h-24 text-center">No users found.</TableCell> {/* Translate text */}
                         </TableRow>
                     )}
                 </TableBody>
             </Table>
-
-            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                <DialogContent className="sm:max-w-[425px]">
-                     {selectedUserForEdit && (
-                        <>
-                            <DialogHeader>
-                                <DialogTitle>Kemaskini Pelan Pengguna</DialogTitle>
-                                <DialogDescription>
-                                    Tukar pelan keahlian untuk <strong>{selectedUserForEdit.name}</strong> ({selectedUserForEdit.email}).
-                                </DialogDescription>
-                            </DialogHeader>
-                            <div className="grid gap-4 py-4">
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label htmlFor="plan-select" className="text-right">Pelan Baru</Label>
-                                    <div className="col-span-3">
-                                        <Select 
-                                            value={newPlanForSelectedUser}
-                                            onValueChange={setNewPlanForSelectedUser}
-                                            disabled={isUpdatingPlan}
-                                        >
-                                            <SelectTrigger id="plan-select">
-                                                <SelectValue placeholder="Pilih pelan..." />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {allowedPlans.map(plan => (
-                                                    <SelectItem key={plan} value={plan}>{plan}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                            </div>
-                            <DialogFooter>
-                                <DialogClose asChild>
-                                    <Button type="button" variant="outline" disabled={isUpdatingPlan}>Batal</Button>
-                                </DialogClose>
-                                <Button onClick={handleUpdatePlan} disabled={isUpdatingPlan || newPlanForSelectedUser === selectedUserForEdit.membershipPlan}>
-                                    {isUpdatingPlan ? 'Menyimpan...' : 'Simpan Perubahan'}
-                                </Button>
-                            </DialogFooter>
-                        </>
-                    )}
-                </DialogContent>
-            </Dialog>
-
-            {/* AlertDialog untuk Tukar Peranan */} 
-            <AlertDialog open={isRoleAlertOpen} onOpenChange={setIsRoleAlertOpen}>
-                 <AlertDialogContent>
-                    {userForRoleChange && (
-                        <>
-                             <AlertDialogHeader>
-                                <AlertDialogTitle>Pengesahan Tukar Peranan</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                     Anda pasti mahu menukar peranan untuk 
-                                     <strong> {userForRoleChange.name} </strong>
-                                     ({userForRoleChange.email}) kepada 
-                                     <strong> {newRoleForChange}?</strong>
-                                     {newRoleForChange === 'admin' && ' Pengguna ini akan mendapat akses penuh admin.'}
-                                     {newRoleForChange === 'user' && ' Pengguna ini akan kehilangan akses admin.'}
-                                 </AlertDialogDescription>
-                             </AlertDialogHeader>
-                             <AlertDialogFooter>
-                                <AlertDialogCancel onClick={() => setUserForRoleChange(null)} disabled={isUpdatingRole}>Batal</AlertDialogCancel>
-                                <AlertDialogAction 
-                                    onClick={handleConfirmRoleChange}
-                                    disabled={isUpdatingRole}
-                                    className={newRoleForChange === 'admin' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}
-                                >
-                                    {isUpdatingRole ? 'Memproses...' : `Ya, Tukar kepada ${newRoleForChange}`}
-                                </AlertDialogAction>
-                             </AlertDialogFooter>
-                        </>
-                    )}
-                </AlertDialogContent>
-            </AlertDialog>
         </div>
     );
 };

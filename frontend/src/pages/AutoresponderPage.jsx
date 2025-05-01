@@ -29,30 +29,30 @@ const AutoresponderPage = () => {
   const [settings, setSettings] = useState({
     isEnabled: false,
     openaiApiKey: '',
-    prompt: 'Anda adalah pembantu AI yang mesra. Balas mesej ini secara ringkas.',
-    savedResponses: [], // Tambah state awal
+    prompt: 'You are a friendly AI assistant. Reply to this message briefly.',
+    savedResponses: [],
   });
-  const [newResponse, setNewResponse] = useState(""); // State untuk input respons baru
+  const [newResponse, setNewResponse] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isManagingResponse, setIsManagingResponse] = useState(false); // State loading untuk operasi respons
+  const [isManagingResponse, setIsManagingResponse] = useState(false);
   const { user } = useAuth();
 
-  // Fetch tetapan semasa komponen dimuatkan
+  // Fetch settings when component mounts
   useEffect(() => {
     const fetchSettings = async () => {
       setIsLoading(true);
       try {
         const response = await api.get('/autoresponder/settings');
-        setSettings(response.data || { // Handle jika tiada data
+        setSettings(response.data || {
           isEnabled: false,
           openaiApiKey: '',
-          prompt: 'Anda adalah pembantu AI yang mesra. Balas mesej ini secara ringkas.',
+          prompt: 'You are a friendly AI assistant. Reply to this message briefly.',
           savedResponses: [],
         });
       } catch (error) {
-        console.error("Gagal mendapatkan tetapan autoresponder:", error);
-        toast.error("Gagal memuatkan tetapan autoresponder.");
+        console.error("Failed to get autoresponder settings:", error);
+        toast.error("Failed to load autoresponder settings.");
       } finally {
         setIsLoading(false);
       }
@@ -63,7 +63,7 @@ const AutoresponderPage = () => {
     }
   }, [user]);
 
-  // Kendalikan perubahan pada input form utama
+  // Handle changes in the main form inputs
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setSettings(prev => ({
@@ -72,7 +72,7 @@ const AutoresponderPage = () => {
     }));
   };
 
-   // Kendalikan perubahan pada Switch shadcn/ui
+   // Handle changes in the shadcn/ui Switch
   const handleSwitchChange = (checked) => {
      setSettings(prev => ({
        ...prev,
@@ -80,65 +80,65 @@ const AutoresponderPage = () => {
      }));
   };
 
-  // Simpan tetapan utama ke backend
+  // Save main settings to backend
   const handleSaveSettings = async () => {
     setIsSaving(true);
     try {
-      // Hanya hantar field yang relevan untuk PUT /settings
+      // Only send relevant fields for PUT /settings
       const settingsToUpdate = {
         isEnabled: settings.isEnabled,
         openaiApiKey: settings.openaiApiKey,
         prompt: settings.prompt,
       };
       const response = await api.put('/autoresponder/settings', settingsToUpdate);
-      // Kemaskini SEMUA state settings termasuk savedResponses yang mungkin berubah oleh operasi lain
+      // Update ALL settings state including savedResponses that might have changed from other operations
       setSettings(response.data);
-      toast.success("Tetapan autoresponder berjaya disimpan.");
+      toast.success("Autoresponder settings saved successfully.");
     } catch (error) {
-      console.error("Gagal menyimpan tetapan autoresponder:", error);
-      const errorMessage = error.response?.data?.message || "Ralat semasa menyimpan tetapan.";
-      toast.error(`Gagal menyimpan: ${errorMessage}`);
+      console.error("Failed to save autoresponder settings:", error);
+      const errorMessage = error.response?.data?.message || "Error saving settings.";
+      toast.error(`Save failed: ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Fungsi baru: Tambah Saved Response
+  // New function: Add Saved Response
   const handleAddResponse = async () => {
       if (!newResponse.trim()) {
-          toast.warning("Sila masukkan teks respons.");
+          toast.warning("Please enter response text.");
           return;
       }
       setIsManagingResponse(true);
       try {
           const response = await api.post('/autoresponder/responses', { response: newResponse });
-          // Kemaskini hanya array savedResponses dalam state
+          // Update only the savedResponses array in the state
           setSettings(prev => ({ ...prev, savedResponses: response.data }));
-          setNewResponse(""); // Kosongkan input selepas berjaya
-          toast.success("Respons berjaya disimpan.");
+          setNewResponse("");
+          toast.success("Response saved successfully.");
       } catch (error) {
-          console.error("Gagal menambah respons:", error);
-          const errorMessage = error.response?.data?.message || "Ralat semasa menyimpan respons.";
-          toast.error(`Gagal menyimpan: ${errorMessage}`);
+          console.error("Failed to add response:", error);
+          const errorMessage = error.response?.data?.message || "Error saving response.";
+          toast.error(`Save failed: ${errorMessage}`);
       } finally {
           setIsManagingResponse(false);
       }
   };
 
-  // Fungsi baru: Padam Saved Response
+  // New function: Delete Saved Response
   const handleRemoveResponse = async (responseToDelete) => {
       setIsManagingResponse(true);
       try {
-          // Encode response untuk URL query
+          // Encode response for URL query
           const encodedResponse = encodeURIComponent(responseToDelete);
           const response = await api.delete(`/autoresponder/responses?response=${encodedResponse}`);
-          // Kemaskini hanya array savedResponses dalam state
+          // Update only the savedResponses array in the state
           setSettings(prev => ({ ...prev, savedResponses: response.data }));
-          toast.success("Respons berjaya dipadam.");
+          toast.success("Response deleted successfully.");
       } catch (error) {
-          console.error("Gagal memadam respons:", error);
-          const errorMessage = error.response?.data?.message || "Ralat semasa memadam respons.";
-          toast.error(`Gagal memadam: ${errorMessage}`);
+          console.error("Failed to delete response:", error);
+          const errorMessage = error.response?.data?.message || "Error deleting response.";
+          toast.error(`Delete failed: ${errorMessage}`);
       } finally {
           setIsManagingResponse(false);
       }
@@ -146,72 +146,72 @@ const AutoresponderPage = () => {
 
 
   if (isLoading) {
-    return <div className="container mx-auto p-4">Memuatkan tetapan...</div>;
+    return <div className="container mx-auto p-4">Loading settings...</div>;
   }
 
   return (
     <div className="container mx-auto p-4 space-y-6">
-      {/* Wrapper untuk mengehadkan lebar dan memusatkan */}
+      {/* Wrapper to limit width and center content */}
       <div className="max-w-3xl mx-auto space-y-6"> 
-          {/* Kad Tetapan Utama */}
+          {/* Main Settings Card */}
           <Card>
             <CardHeader>
-              <CardTitle>Tetapan Autoresponder + AI</CardTitle>
+              <CardTitle>Autoresponder + AI Settings</CardTitle>
               <CardDescription>
-                Konfigurasi balasan mesej automatik menggunakan OpenAI.
+                Configure automatic message replies using OpenAI.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Aktifkan Autoresponder */}
+              {/* Enable Autoresponder */}
               <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
                  <div className="space-y-0.5">
-                     <Label htmlFor="autoresponder-switch" className="text-base">Aktifkan Autoresponder</Label>
+                     <Label htmlFor="autoresponder-switch" className="text-base">Enable Autoresponder</Label>
                      <CardDescription>
-                     Hidupkan untuk membalas mesej WhatsApp secara automatik.
+                     Turn on to automatically reply to WhatsApp messages.
                      </CardDescription>
                  </div>
                  <Switch
                     id="autoresponder-switch"
                     checked={settings.isEnabled}
                     onCheckedChange={handleSwitchChange}
-                    disabled={isSaving || isManagingResponse} // Disable jika sedang save/manage
+                    disabled={isSaving || isManagingResponse}
                  />
               </div>
 
-              {/* Tetapan hanya dipaparkan jika autoresponder diaktifkan */}
+              {/* Settings only shown if autoresponder is enabled */}
               {settings.isEnabled && (
                 <div className="space-y-4">
                   {/* OpenAI API Key */}
                   <div className="space-y-2">
-                    <Label htmlFor="openaiApiKey">Kunci API OpenAI</Label>
+                    <Label htmlFor="openaiApiKey">OpenAI API Key</Label>
                      <Input
                         id="openaiApiKey"
                         name="openaiApiKey"
                         type="password"
                         placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                        value={settings.openaiApiKey || ''} // Pastikan value tidak undefined
+                        value={settings.openaiApiKey || ''}
                         onChange={handleChange}
                         disabled={isSaving || isManagingResponse}
                      />
                      <p className="text-sm text-muted-foreground">
-                        Dapatkan kunci API anda dari <a href="https://platform.openai.com/account/api-keys" target="_blank" rel="noopener noreferrer" className="underline">laman web OpenAI</a>.
+                        Get your API key from the <a href="https://platform.openai.com/account/api-keys" target="_blank" rel="noopener noreferrer" className="underline">OpenAI website</a>.
                      </p>
                   </div>
 
-                  {/* Prompt AI */}
+                  {/* AI Prompt */}
                   <div className="space-y-2">
-                    <Label htmlFor="prompt">Prompt AI</Label>
+                    <Label htmlFor="prompt">AI Prompt</Label>
                      <Textarea
                         id="prompt"
                         name="prompt"
-                        placeholder="Terangkan bagaimana AI patut membalas..."
+                        placeholder="Describe how the AI should respond..."
                         value={settings.prompt}
                         onChange={handleChange}
                         rows={5}
                         disabled={isSaving || isManagingResponse}
                      />
                      <p className="text-sm text-muted-foreground">
-                       Arahan yang diberikan kepada AI untuk menjana balasan.
+                       Instructions given to the AI to generate replies.
                      </p>
                   </div>
                 </div>
@@ -219,81 +219,82 @@ const AutoresponderPage = () => {
             </CardContent>
             <CardFooter>
               <Button onClick={handleSaveSettings} disabled={isSaving || isManagingResponse || !settings.isEnabled}>
-                {isSaving ? 'Menyimpan...' : 'Simpan Tetapan'}
+                {isSaving ? 'Saving...' : 'Save Settings'}
               </Button>
             </CardFooter>
           </Card>
 
-           {/* Kad Pengurusan Respons Tersimpan */}
+           {/* Saved Responses Management Card */}
           <Card>
               <CardHeader>
-                  <CardTitle>Respons Tersimpan</CardTitle>
+                  <CardTitle>Saved Responses</CardTitle>
                   <CardDescription>
-                     Tambah dan urus templat respons pantas atau rujukan AI.
+                     Add and manage quick response templates or AI references.
                   </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                   {/* Input untuk tambah respons baru */}
+                   {/* Input to add new response */}
                    <div className="space-y-2">
-                       <Label htmlFor="newResponse">Tambah Respons Baru</Label>
+                       <Label htmlFor="newResponse">Add New Response</Label>
                        <Textarea
                            id="newResponse"
-                           placeholder="Masukkan teks respons di sini..."
+                           placeholder="Enter response text here..."
                            value={newResponse}
                            onChange={(e) => setNewResponse(e.target.value)}
                            rows={3}
                            disabled={isManagingResponse || isSaving}
                        />
-                       {/* Tambah Penerangan Spintax */}
+                       {/* Add Spintax Description */}
                        <p className="text-xs text-muted-foreground">
-                           Anda boleh guna format Spintax <code className="bg-muted px-1 py-0.5 rounded">{'{'}a|b{'}'}</code> untuk variasi rawak.
+                           You can use Spintax format <code className="bg-muted px-1 py-0.5 rounded">{"{" + "a|b" + "}"}</code> for random variations.
                        </p>
-                       <Button size="sm" onClick={handleAddResponse} disabled={isManagingResponse || isSaving || !newResponse.trim()}>
-                           {isManagingResponse ? 'Menyimpan...' : 'Simpan Respons'}
-                       </Button>
                    </div>
+                   <Button onClick={handleAddResponse} disabled={isManagingResponse || isSaving || !newResponse.trim()}>
+                        {isManagingResponse ? 'Adding...' : 'Add Response'}
+                   </Button>
 
-                   {/* Senarai respons tersimpan */}
+                   {/* List of saved responses */}
                    <div className="space-y-2">
-                       <Label>Senarai Respons Sedia Ada</Label>
+                       <Label>Current Saved Responses</Label>
                        {settings.savedResponses && settings.savedResponses.length > 0 ? (
-                           <ScrollArea className="h-48 w-full rounded-md border p-4">
+                           <ScrollArea className="h-40 w-full rounded-md border p-3">
                                <div className="space-y-2">
                                    {settings.savedResponses.map((resp, index) => (
                                        <div key={index} className="flex items-center justify-between p-2 rounded bg-muted/50">
-                                           <p className="text-sm flex-1 mr-2">{resp}</p>
-                                           {/* Butang Padam dengan Dialog Pengesahan */}
-                                           <AlertDialog>
-                                               <AlertDialogTrigger asChild>
-                                                   <Button variant="ghost" size="icon" className="h-7 w-7" disabled={isManagingResponse || isSaving}>
-                                                       <Trash2 className="h-4 w-4 text-red-500" />
-                                                   </Button>
-                                               </AlertDialogTrigger>
-                                               <AlertDialogContent>
-                                                   <AlertDialogHeader>
-                                                       <AlertDialogTitle>Anda Pasti?</AlertDialogTitle>
-                                                       <AlertDialogDescription>
-                                                           Tindakan ini akan memadam respons yang disimpan secara kekal: "{resp.length > 50 ? resp.substring(0, 50) + '...' : resp}"
-                                                       </AlertDialogDescription>
-                                                   </AlertDialogHeader>
-                                                   <AlertDialogFooter>
-                                                       <AlertDialogCancel disabled={isManagingResponse}>Batal</AlertDialogCancel>
-                                                       <AlertDialogAction
-                                                            onClick={() => handleRemoveResponse(resp)}
-                                                            disabled={isManagingResponse}
-                                                            className="bg-red-600 hover:bg-red-700"
-                                                        >
-                                                            Padam
-                                                        </AlertDialogAction>
-                                                   </AlertDialogFooter>
-                                               </AlertDialogContent>
-                                           </AlertDialog>
+                                           <span className="flex-1 truncate" title={resp}>{resp}</span>
+                                           <Badge className="bg-muted text-muted-foreground">
+                                               <AlertDialog>
+                                                   <AlertDialogTrigger asChild>
+                                                       <Button variant="ghost" size="icon" className="h-6 w-6" disabled={isManagingResponse || isSaving}>
+                                                           <Trash2 className="h-4 w-4 text-destructive" />
+                                                       </Button>
+                                                   </AlertDialogTrigger>
+                                                   <AlertDialogContent>
+                                                       <AlertDialogHeader>
+                                                           <AlertDialogTitle>Delete Saved Response?</AlertDialogTitle>
+                                                           <AlertDialogDescription>
+                                                               This action will permanently delete the response: "{resp}".
+                                                           </AlertDialogDescription>
+                                                       </AlertDialogHeader>
+                                                       <AlertDialogFooter>
+                                                           <AlertDialogCancel disabled={isManagingResponse}>Cancel</AlertDialogCancel>
+                                                           <AlertDialogAction 
+                                                             onClick={() => handleRemoveResponse(resp)}
+                                                             disabled={isManagingResponse}
+                                                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                                           >
+                                                             {isManagingResponse ? 'Deleting...' : 'Delete'}
+                                                           </AlertDialogAction>
+                                                       </AlertDialogFooter>
+                                                   </AlertDialogContent>
+                                               </AlertDialog>
+                                           </Badge>
                                        </div>
                                    ))}
                                </div>
                            </ScrollArea>
                        ) : (
-                           <p className="text-sm text-muted-foreground italic">Tiada respons disimpan lagi.</p>
+                           <p className="text-sm text-muted-foreground text-center py-4">No saved responses yet.</p>
                        )}
                    </div>
               </CardContent>

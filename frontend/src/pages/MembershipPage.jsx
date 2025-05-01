@@ -4,14 +4,14 @@ import { useAuth } from '../contexts/AuthContext'; // Untuk check user
 import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge"; // Untuk paparkan nama pelan
-import { Skeleton } from "@/components/ui/skeleton"; // Untuk loading state
+import { Skeleton } from "@/components/ui/skeleton"; // For loading state
 
 const MembershipPage = () => {
   const [profile, setProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const { user } = useAuth(); // Dapatkan pengguna yang log masuk
+  const { user } = useAuth(); // Get the logged-in user
 
-  // Fetch profil pengguna semasa komponen dimuatkan
+  // Fetch user profile when the component mounts
   useEffect(() => {
     const fetchProfile = async () => {
       setIsLoading(true);
@@ -19,39 +19,39 @@ const MembershipPage = () => {
         const response = await api.get('/users/profile');
         setProfile(response.data);
       } catch (error) {
-        console.error("Gagal mendapatkan profil pengguna:", error);
-        toast.error("Gagal memuatkan maklumat keahlian.");
+        console.error("Failed to get user profile:", error); // Translate error log
+        toast.error("Failed to load membership information."); // Translate toast message
       } finally {
         setIsLoading(false);
       }
     };
 
-    if (user) { // Pastikan pengguna sudah log masuk
+    if (user) { // Ensure user is logged in
       fetchProfile();
     }
   }, [user]);
 
-  // Fungsi untuk format tarikh
+  // Function to format date
   const formatDate = (dateString) => {
     if (!dateString) return '-';
     try {
-      return new Date(dateString).toLocaleDateString('ms-MY', { // Guna locale Malaysia
+      return new Date(dateString).toLocaleDateString('en-US', { // Use US locale for English
         day: 'numeric',
         month: 'long',
         year: 'numeric'
       });
     } catch (error) {
-      console.error("Ralat format tarikh:", error);
-      return dateString; // Kembalikan string asal jika ralat
+      console.error("Date format error:", error); // Translate error log
+      return dateString; // Return original string on error
     }
   };
 
-  // Fungsi untuk tentukan warna badge berdasarkan pelan
+  // Function to determine badge color based on plan
   const getBadgeVariant = (plan) => {
       switch (plan?.toLowerCase()) {
-          case 'pro': return 'default'; // Warna default (biasanya gelap/utama)
-          case 'basic': return 'secondary'; // Warna sekunder
-          case 'free': return 'outline'; // Warna outline
+          case 'pro': return 'default'; // Default color (usually dark/primary)
+          case 'basic': return 'secondary'; // Secondary color
+          case 'free': return 'outline'; // Outline color
           default: return 'secondary';
       }
   }
@@ -60,8 +60,8 @@ const MembershipPage = () => {
     <div className="container mx-auto p-4">
       <Card>
         <CardHeader>
-          <CardTitle>Status Keahlian</CardTitle>
-          <CardDescription>Maklumat pelan langganan semasa anda.</CardDescription>
+          <CardTitle>Membership Status</CardTitle> {/* Translate title */}
+          <CardDescription>Information about your current subscription plan.</CardDescription> {/* Translate description */}
         </CardHeader>
         <CardContent className="space-y-4">
           {isLoading ? (
@@ -72,23 +72,23 @@ const MembershipPage = () => {
             </div>
           ) : profile ? (
             <div>
-              <p className="text-sm text-muted-foreground">Pelan Semasa:</p>
+              <p className="text-sm text-muted-foreground">Current Plan:</p> {/* Translate label */}
               <Badge variant={getBadgeVariant(profile.membershipPlan)} className="text-lg font-semibold mb-2">
-                {profile.membershipPlan || 'Tidak Diketahui'}
+                {profile.membershipPlan || 'Unknown'} {/* Translate fallback text */}
               </Badge>
               
-              <p className="text-sm text-muted-foreground mt-4">Tarikh Mendaftar:</p>
+              <p className="text-sm text-muted-foreground mt-4">Registration Date:</p> {/* Translate label */}
               <p>{formatDate(profile.createdAt)}</p>
               
-              {/* Di sini boleh tambah maklumat had ciri berdasarkan pelan */} 
-              {/* Contoh: <p>Had Penghantaran Pukal: 100 / hari</p> */}
-              {/* Contoh: <p>Storan Media: 500MB</p> */} 
+              {/* Feature limits based on the plan can be added here */} 
+              {/* Example: <p>Bulk Sending Limit: 100 / day</p> */}
+              {/* Example: <p>Media Storage: 500MB</p> */} 
               
-              {/* Tambah butang untuk naik taraf jika perlu */}
-              {/* <Button className="mt-6">Naik Taraf Pelan</Button> */}
+              {/* Add upgrade button if needed */}
+              {/* Example: <Button className="mt-6">Upgrade Plan</Button> */}
             </div>
           ) : (
-            <p className="text-red-600">Gagal memuatkan maklumat keahlian.</p>
+            <p className="text-red-600">Failed to load membership information.</p>
           )}
         </CardContent>
       </Card>

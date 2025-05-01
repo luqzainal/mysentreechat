@@ -75,10 +75,10 @@ function ContactPage() {
       const { data } = await api.get('/contacts'); // Tukar axios.get ke api.get
       setContacts(data);
     } catch (err) {
-      console.error("Ralat mendapatkan kenalan:", err);
-      setError(err.response?.data?.message || "Gagal mendapatkan senarai kenalan.");
+      console.error("Error getting contacts:", err);
+      setError(err.response?.data?.message || "Failed to get contact list.");
       // Mungkin toast error di sini jika mahu
-      toast({ title: "Ralat Memuatkan", description: err.response?.data?.message || "Gagal mendapatkan senarai kenalan.", variant: "destructive" });
+      toast({ title: "Loading Error", description: err.response?.data?.message || "Failed to get contact list.", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -110,12 +110,12 @@ function ContactPage() {
         setNewContactName(''); 
         setNewContactPhone('');
         setIsAddDialogOpen(false);
-        toast({ title: "Berjaya", description: `Kenalan ${newContact.name} telah ditambah.` });
+        toast({ title: "Success", description: `Contact ${newContact.name} has been added.` });
 
     } catch (err) {
-        console.error("Ralat menambah kenalan:", err);
-        const message = err.response?.data?.message || "Gagal menambah kenalan.";
-        toast({ title: "Ralat", description: message, variant: "destructive" });
+        console.error("Error adding contact:", err);
+        const message = err.response?.data?.message || "Failed to add contact.";
+        toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
         setIsAdding(false);
     }
@@ -134,12 +134,12 @@ function ContactPage() {
         await api.delete(`/contacts/${contactId}`);
         
         setContacts(contacts.filter(contact => contact._id !== contactId));
-        toast({ title: "Berjaya", description: "Kenalan telah dipadam." });
+        toast({ title: "Success", description: "Contact has been deleted." });
 
      } catch (err) {
-        console.error("Ralat memadam kenalan:", err);
-        const message = err.response?.data?.message || "Gagal memadam kenalan.";
-        toast({ title: "Ralat", description: message, variant: "destructive" });
+        console.error("Error deleting contact:", err);
+        const message = err.response?.data?.message || "Failed to delete contact.";
+        toast({ title: "Error", description: message, variant: "destructive" });
      }
   };
 
@@ -151,8 +151,8 @@ function ContactPage() {
     } else {
       setSelectedFile(null);
       toast({
-        title: "Format Fail Tidak Sah",
-        description: "Sila pilih fail Excel (.xlsx atau .xls).",
+        title: "Invalid File Format",
+        description: "Please select an Excel file (.xlsx or .xls).",
         variant: "destructive",
       });
     }
@@ -167,8 +167,8 @@ function ContactPage() {
   const handleUpload = async () => {
     if (!selectedFile) {
       toast({
-        title: "Tiada Fail Dipilih",
-        description: "Sila pilih fail Excel untuk dimuat naik.",
+        title: "No File Selected",
+        description: "Please select an Excel file to upload.",
         variant: "warning", // Guna variant warning
       });
       return;
@@ -195,15 +195,15 @@ function ContactPage() {
       const { data: responseData } = await api.post('/contacts/upload', formData, config);
 
       toast({
-        title: "Muat Naik Selesai",
+        title: "Upload Complete",
         description: responseData.message, 
       });
 
       if (responseData.errors && responseData.errors.length > 0) {
-          console.warn("Ralat semasa import:", responseData.errors);
+          console.warn("Errors during import:", responseData.errors);
           toast({
-            title: `Terdapat ${responseData.errors.length} baris diabaikan`,
-            description: "Semak konsol untuk maklumat lanjut atau muat turun laporan.",
+            title: `There were ${responseData.errors.length} rows skipped`,
+            description: "Check the console for more details or download the report.",
             variant: "warning",
             duration: 7000, 
           })
@@ -213,9 +213,9 @@ function ContactPage() {
       fetchContacts();
 
     } catch (err) {
-      console.error("Ralat memuat naik kenalan:", err);
-      const message = err.response?.data?.message || "Gagal memuat naik fail kenalan.";
-      toast({ title: "Ralat Muat Naik", description: message, variant: "destructive" });
+      console.error("Error uploading contacts:", err);
+      const message = err.response?.data?.message || "Failed to upload contact file.";
+      toast({ title: "Upload Error", description: message, variant: "destructive" });
     } finally {
       setIsUploading(false);
     }
@@ -225,22 +225,22 @@ function ContactPage() {
     <div className="space-y-6">
       <Toaster />
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Urus Kenalan</h1>
+        <h1 className="text-3xl font-bold">Manage Contacts</h1>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}> {/* Kawal Dialog */} 
           <DialogTrigger asChild>
-            <Button>Tambah Kenalan Baru</Button>
+            <Button>Add New Contact</Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <form onSubmit={handleAddContact}>
               <DialogHeader>
-                <DialogTitle>Tambah Kenalan Baru</DialogTitle>
+                <DialogTitle>Add New Contact</DialogTitle>
                 <DialogDescription>
-                  Masukkan nama dan nombor telefon (cth., 60123456789).
+                  Enter name and phone number (e.g., 60123456789).
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="name" className="text-right">Nama</Label>
+                  <Label htmlFor="name" className="text-right">Name</Label>
                   <Input 
                     id="name"
                     value={newContactName}
@@ -251,13 +251,13 @@ function ContactPage() {
                   />
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="phone" className="text-right">Nombor Telefon</Label>
+                  <Label htmlFor="phone" className="text-right">Phone Number</Label>
                   <Input 
                     id="phone"
                     value={newContactPhone}
                     onChange={(e) => setNewContactPhone(e.target.value)}
-                    className="col-span-3" 
                     placeholder="601xxxxxxxx"
+                    className="col-span-3" 
                     required
                     disabled={isAdding}
                   />
@@ -265,10 +265,10 @@ function ContactPage() {
               </div>
               <DialogFooter>
                  <DialogClose asChild>
-                    <Button type="button" variant="outline" disabled={isAdding}>Batal</Button>
+                    <Button type="button" variant="secondary" disabled={isAdding}>Cancel</Button>
                  </DialogClose>
                 <Button type="submit" disabled={isAdding}>
-                  {isAdding ? "Menambah..." : "Tambah Kenalan"}
+                  {isAdding ? 'Adding...' : 'Add Contact'}
                 </Button>
               </DialogFooter>
             </form>
@@ -279,47 +279,45 @@ function ContactPage() {
       {/* Bahagian Muat Naik Fail */}
       <Card>
           <CardHeader>
-              <CardTitle>Muat Naik Kenalan Pukal</CardTitle>
+              <CardTitle>Import Contacts from Excel</CardTitle>
               <CardDescription>
-                  Tambah kenalan dari fail Excel (.xlsx). Pastikan fail mempunyai lajur "Nama" dan "Nombor Telefon".
+                  Upload an Excel file (.xlsx or .xls) with 'Name' and 'PhoneNumber' columns.
               </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-              {/* Input fail tersembunyi */}
-              <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  onChange={handleFileChange} 
-                  accept=".xlsx, .xls" 
-                  className="hidden" 
+          <CardContent className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-4">
+              <Input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                accept=".xlsx, .xls" 
+                className="hidden"
               />
-              {/* Butang untuk trigger input fail */}
-              <Button variant="outline" onClick={handleChooseFileClick} disabled={isUploading}>
-                  <FileText className="mr-2 h-4 w-4" /> Pilih Fail Excel
+              <Button onClick={handleChooseFileClick} variant="outline" disabled={isUploading}>
+                  <FileText className="mr-2 h-4 w-4" />
+                 {selectedFile ? selectedFile.name : 'Choose File'}
               </Button>
-              {/* Papar nama fail dipilih */}
-              {selectedFile && (
-                  <div className="text-sm text-muted-foreground">
-                      Fail dipilih: <strong>{selectedFile.name}</strong>
-                  </div>
-              )}
-              {/* Butang Muat Naik */}
-              <Button onClick={handleUpload} disabled={!selectedFile || isUploading}>
-                  <Upload className="mr-2 h-4 w-4" /> {isUploading ? 'Memuat Naik...' : 'Muat Naik Fail'}
-              </Button>
+               <span className="text-sm text-muted-foreground flex-1 truncate">
+                  {selectedFile ? `(${Math.round(selectedFile.size / 1024)} KB)` : "No file chosen"}
+               </span>
           </CardContent>
+           <CardFooter>
+              <Button onClick={handleUpload} disabled={isUploading || !selectedFile}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  {isUploading ? 'Uploading...' : 'Upload and Import'}
+              </Button>
+           </CardFooter>
       </Card>
 
-      {isLoading && <p>Memuatkan senarai kenalan...</p>}
-      {error && <Alert variant="destructive"><AlertTitle>Ralat</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+      {isLoading && <p>Loading contact list...</p>}
+      {error && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       
       {!isLoading && !error && (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nama</TableHead>
-              <TableHead>Nombor Telefon</TableHead>
-              <TableHead className="text-right">Tindakan</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Phone Number</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -331,19 +329,21 @@ function ContactPage() {
                   <TableCell className="text-right">
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm"> {/* Icon Trash2 di sini */} Padam</Button>
+                        <Button variant="ghost" size="icon" className="hover:bg-destructive/10">
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Anda pasti?</AlertDialogTitle>
+                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                           <AlertDialogDescription>
-                            Tindakan ini tidak boleh diundur. Ini akan memadam kenalan '{contact.name}' secara kekal.
+                            This action will permanently delete the contact '{contact.name}'.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel>Batal</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteContact(contact._id)}>
-                            Teruskan Padam
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleDeleteContact(contact._id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Delete
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
@@ -353,7 +353,7 @@ function ContactPage() {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={3} className="text-center">Tiada kenalan ditemui.</TableCell>
+                <TableCell colSpan={3} className="text-center">No contacts added yet.</TableCell>
               </TableRow>
             )}
           </TableBody>

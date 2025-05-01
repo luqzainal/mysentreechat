@@ -9,17 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const AccountPage = () => {
-  const { user, login } = useAuth(); // Ambil fungsi login untuk update user state + token
+  const { user, login } = useAuth(); // Get login function to update user state + token
   const [formData, setFormData] = useState({
     name: '',
-    email: '', // Email biasanya tidak boleh diubah
-    password: '', // Untuk kemaskini kata laluan
+    email: '', // Email is typically non-editable
+    password: '', // For password update
     confirmPassword: '',
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Isi form dengan data pengguna semasa komponen dimuatkan
+  // Populate form with current user data when component mounts
   useEffect(() => {
     if (user) {
       setFormData(prev => ({
@@ -29,22 +29,22 @@ const AccountPage = () => {
       }));
       setIsLoading(false);
     } else {
-       // Jika user belum ada (mungkin loading context), tunggu
+       // If user is not yet available (context might be loading), wait
        setIsLoading(true);
     }
   }, [user]);
 
-  // Kendalikan perubahan input
+  // Handle input changes
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // Hantar data kemaskini ke backend
+  // Submit update data to backend
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (formData.password && formData.password !== formData.confirmPassword) {
-      toast.error("Kata laluan dan pengesahan kata laluan tidak sepadan.");
+      toast.error("Password and confirmation password do not match."); // Translate toast message
       return;
     }
     
@@ -52,26 +52,26 @@ const AccountPage = () => {
     try {
       const payload = {
         name: formData.name,
-        // Jangan hantar email jika tidak boleh diubah
+        // Do not send email if it's non-editable
       };
-      // Hanya hantar password jika ia diisi
+      // Only send password if it's filled
       if (formData.password) {
         payload.password = formData.password;
       }
 
       const response = await api.put('/users/profile', payload);
       
-      // Kemaskini state AuthContext dengan data baru & token baru
+      // Update AuthContext state with new data & new token
       login(response.data, response.data.token); 
 
-      toast.success("Profil berjaya dikemaskini.");
-      // Reset medan password selepas berjaya
+      toast.success("Profile updated successfully."); // Translate toast message
+      // Reset password fields after success
       setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
 
     } catch (error) {
-      console.error("Gagal mengemaskini profil:", error);
-      const errorMessage = error.response?.data?.message || "Ralat semasa mengemaskini profil.";
-      toast.error(`Gagal: ${errorMessage}`);
+      console.error("Failed to update profile:", error); // Translate error log
+      const errorMessage = error.response?.data?.message || "Error updating profile."; // Translate error message
+      toast.error(`Failed: ${errorMessage}`); // Translate toast message
     } finally {
       setIsSaving(false);
     }
@@ -104,13 +104,13 @@ const AccountPage = () => {
       <Card>
         <form onSubmit={handleSubmit}>
           <CardHeader>
-            <CardTitle>Pengurus Akaun</CardTitle>
-            <CardDescription>Kemaskini maklumat profil dan kata laluan anda.</CardDescription>
+            <CardTitle>Account Manager</CardTitle> {/* Translate title */}
+            <CardDescription>Update your profile information and password.</CardDescription> {/* Translate description */}
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Nama */}
+            {/* Name */}
             <div className="space-y-2">
-              <Label htmlFor="name">Nama</Label>
+              <Label htmlFor="name">Name</Label> {/* Translate label */}
               <Input 
                 id="name"
                 name="name"
@@ -122,23 +122,23 @@ const AccountPage = () => {
             </div>
             {/* Email (Read Only) */}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Email</Label> {/* Translate label */}
               <Input 
                 id="email"
                 name="email"
                 type="email"
                 value={formData.email}
-                readOnly // Jadikan read-only
-                disabled // Juga disable untuk visual
+                readOnly // Make read-only
+                disabled // Also disable visually
                 className="cursor-not-allowed"
               />
                <p className="text-sm text-muted-foreground">
-                   Email tidak boleh diubah.
+                   Email cannot be changed. {/* Translate text */}
                  </p>
             </div>
-            {/* Kata Laluan Baru */}
+            {/* New Password */}
             <div className="space-y-2">
-              <Label htmlFor="password">Kata Laluan Baru (biarkan kosong jika tidak mahu tukar)</Label>
+              <Label htmlFor="password">New Password (leave blank to keep current)</Label> {/* Translate label */}
               <Input 
                 id="password"
                 name="password"
@@ -148,22 +148,22 @@ const AccountPage = () => {
                 disabled={isSaving}
               />
             </div>
-            {/* Sahkan Kata Laluan Baru */}
+            {/* Confirm New Password */}
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Sahkan Kata Laluan Baru</Label>
+              <Label htmlFor="confirmPassword">Confirm New Password</Label> {/* Translate label */}
               <Input 
                 id="confirmPassword"
                 name="confirmPassword"
                 type="password"
                 value={formData.confirmPassword}
                 onChange={handleChange}
-                disabled={isSaving || !formData.password} // Disable jika password kosong
+                disabled={isSaving || !formData.password} // Disable if password is empty
               />
             </div>
           </CardContent>
           <CardFooter>
             <Button type="submit" disabled={isSaving}>
-              {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
+              {isSaving ? 'Saving...' : 'Save Changes'} {/* Translate button text */}
             </Button>
           </CardFooter>
         </form>

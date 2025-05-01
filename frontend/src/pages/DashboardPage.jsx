@@ -67,22 +67,22 @@ function DashboardPage() {
         setSocketConnected(false);
         setConnectionStatus('disconnected');
         setRawQrString(null);
-        toast.error(`Gagal menyambung ke pelayan: ${err.message}`);
+        toast.error(`Failed to connect to server: ${err.message}`);
     });
     socket.on('whatsapp_status', (status) => {
-      console.log('Status WhatsApp diterima:', status);
+      console.log('WhatsApp status received:', status);
       setConnectionStatus(status);
       if (status !== 'waiting_qr') {
         setRawQrString(null);
       }
     });
     socket.on('whatsapp_qr', (qrString) => {
-      console.log('String QR Code diterima');
+      console.log('QR Code string received');
       setRawQrString(qrString);
       setConnectionStatus('waiting_qr');
     });
      socket.on('error_message', (message) => {
-        console.error('Ralat dari Backend:', message);
+        console.error('Error from Backend:', message);
         toast.error(message);
         if (connectionStatus === 'Connecting...') {
              setConnectionStatus('disconnected');
@@ -111,26 +111,26 @@ function DashboardPage() {
   // Salin semula handleConnectRequest
   const handleConnectRequest = () => {
     if (socket && socket.connected && user?._id) {
-      console.log(`Menghantar whatsapp_connect_request untuk user: ${user._id}`);
+      console.log(`Sending whatsapp_connect_request for user: ${user._id}`);
       socket.emit('whatsapp_connect_request', user._id);
       setConnectionStatus('Connecting...'); 
       setRawQrString(null); 
-      toast.info("Meminta sambungan WhatsApp...");
+      toast.info("Requesting WhatsApp connection...");
     } else if (!socket || !socket.connected) {
-       toast.error("Sambungan ke pelayan belum sedia. Sila cuba sebentar lagi.");
+       toast.error("Connection to server not ready. Please try again later.");
     } else if (!user?._id) {
-        toast.error("User ID tidak tersedia. Sila log masuk semula.");
+        toast.error("User ID not available. Please log in again.");
     }
   };
 
   // Salin semula handleDisconnectRequest
   const handleDisconnectRequest = () => {
       if (socket && socket.connected) {
-          console.log("Menghantar whatsapp_disconnect_request");
+          console.log("Sending whatsapp_disconnect_request");
           socket.emit('whatsapp_disconnect_request');
-          toast.info("Meminta putus sambungan WhatsApp...");
+          toast.info("Requesting WhatsApp disconnection...");
       } else {
-           toast.error("Sambungan ke pelayan tiada.");
+           toast.error("No connection to server.");
       }
   }
 
@@ -143,25 +143,25 @@ function DashboardPage() {
     switch (connectionStatus) {
       case 'connected':
         icon = <Wifi className="h-5 w-5 mr-2 text-green-600" />;
-        text = "Tersambung";
+        text = "Connected";
         variant = "success";
         break;
       case 'disconnected':
         icon = <WifiOff className="h-5 w-5 mr-2 text-red-600" />;
-        text = "Terputus";
+        text = "Disconnected";
         variant = "destructive";
         break;
       case 'waiting_qr':
         icon = <QrCodeIcon className="h-5 w-5 mr-2 text-blue-600" />;
-        text = "Menunggu Imbasan QR";
+        text = "Waiting for QR Scan";
         variant = "outline";
         break;
       case 'Connecting...':
-         text = "Menyambung...";
+         text = "Connecting...";
          break;
        case 'User not loaded':
           icon = <XCircle className="h-5 w-5 mr-2 text-yellow-600" />;
-          text = "Pengguna Belum Sedia";
+          text = "User Not Ready";
           break;
        default:
         break;
@@ -177,8 +177,8 @@ function DashboardPage() {
   // Definisi kad-kad menu/modul
   const modules = [
     {
-      title: "Kenalan",
-      description: "Urus senarai kenalan WhatsApp anda.",
+      title: "Contacts",
+      description: "Manage your WhatsApp contact list.",
       link: "/contacts",
       icon: Users,
       bgColor: "bg-blue-100",
@@ -186,7 +186,7 @@ function DashboardPage() {
     },
     {
       title: "Bulk Sender",
-      description: "Hantar mesej pukal ke kenalan.",
+      description: "Send bulk messages to contacts.",
       link: "/bulk-sender",
       icon: Send,
       bgColor: "bg-green-100",
@@ -194,31 +194,31 @@ function DashboardPage() {
     },
     {
       title: "Autoresponder + AI",
-      description: "Tetapkan balasan automatik dengan AI.",
+      description: "Set up automated replies with AI.",
       link: "/autoresponder",
       icon: Bot,
       bgColor: "bg-purple-100",
       iconColor: "text-purple-600"
     },
     {
-      title: "Storan Media",
-      description: "Muat naik dan urus fail media.",
+      title: "Media Storage",
+      description: "Upload and manage media files.",
       link: "/media-storage",
       icon: ImageIcon,
        bgColor: "bg-orange-100",
       iconColor: "text-orange-600"
     },
      {
-      title: "Keahlian",
-      description: "Lihat pelan langganan semasa.",
+      title: "Membership",
+      description: "View current subscription plan.",
       link: "/membership",
       icon: BadgeInfo,
        bgColor: "bg-yellow-100",
       iconColor: "text-yellow-600"
     },
     {
-      title: "Pengurus Akaun",
-      description: "Kemaskini profil dan tetapan akaun.",
+      title: "Account Manager",
+      description: "Update profile and account settings.",
       link: "/account",
       icon: UserCog,
        bgColor: "bg-gray-100",
@@ -228,7 +228,7 @@ function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Selamat Datang, {user?.name || 'Pengguna'}!</h1>
+      <h1 className="text-3xl font-bold">Welcome, {user?.name || 'User'}!</h1>
       
        {/* Wrapper untuk mengehadkan lebar dan memusatkan Kad Sambungan WhatsApp */}
       <div className="max-w-3xl mx-auto">
@@ -236,7 +236,7 @@ function DashboardPage() {
           <Card>
             {/* Ubah header untuk memusatkan kandungan */}
             <CardHeader className="flex flex-col items-center space-y-2 pb-2">
-              <CardTitle className="text-lg font-medium">Sambungan WhatsApp</CardTitle>
+              <CardTitle className="text-lg font-medium">WhatsApp Connection</CardTitle>
               {renderStatusDisplay()} 
             </CardHeader>
             {/* Pastikan content juga memusatkan item */}
@@ -247,7 +247,7 @@ function DashboardPage() {
                   <div className="flex justify-center">
                     <QRCode value={rawQrString} size={200} /> 
                   </div>
-                  <p className="mt-2 text-center text-sm text-muted-foreground">Imbas kod ini menggunakan WhatsApp anda.</p>
+                  <p className="mt-2 text-center text-sm text-muted-foreground">Scan this code using your WhatsApp.</p>
                 </div>
               )}
               

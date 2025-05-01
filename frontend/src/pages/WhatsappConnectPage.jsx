@@ -50,7 +50,7 @@ const WhatsappConnectPage = () => {
       setSocketConnected(false);
       setConnectionStatus('disconnected'); // Reset WA status on socket disconnect
       setRawQrString(null);
-      toast.error("Sambungan ke pelayan terputus.");
+      toast.error("Connection to server lost.");
     });
 
     socket.on('connect_error', (err) => {
@@ -58,30 +58,30 @@ const WhatsappConnectPage = () => {
         setSocketConnected(false);
         setConnectionStatus('disconnected');
         setRawQrString(null);
-        toast.error(`Gagal menyambung ke pelayan: ${err.message}`);
+        toast.error(`Failed to connect to server: ${err.message}`);
     });
 
-    // Listener untuk status WhatsApp dari backend
+    // Listener for WhatsApp status from backend
     socket.on('whatsapp_status', (status) => {
-      console.log('Status WhatsApp diterima:', status);
+      console.log('WhatsApp status received:', status);
       setConnectionStatus(status);
       if (status !== 'waiting_qr') {
-        setRawQrString(null); // Kosongkan QR jika status bukan waiting_qr
+        setRawQrString(null); // Clear QR if status is not waiting_qr
       }
     });
 
-    // Listener untuk QR code WhatsApp (string mentah)
+    // Listener for WhatsApp QR code (raw string)
     socket.on('whatsapp_qr', (qrString) => {
-      console.log('String QR Code diterima');
+      console.log('QR Code string received');
       setRawQrString(qrString);
       setConnectionStatus('waiting_qr'); // Ensure status is waiting_qr
     });
 
-     // Listener untuk mesej ralat dari backend
+     // Listener for error messages from backend
      socket.on('error_message', (message) => {
-        console.error('Ralat dari Backend:', message);
+        console.error('Error from Backend:', message);
         toast.error(message);
-        // Reset status jika perlu
+        // Reset status if needed
         if (connectionStatus === 'Connecting...') {
              setConnectionStatus('disconnected');
         }
@@ -108,76 +108,76 @@ const WhatsappConnectPage = () => {
      return connectSocket();
   }, [connectSocket]);
 
-  // Fungsi untuk meminta sambungan WA baru
+  // Function to request a new WA connection
   const handleConnectRequest = () => {
     if (socket && socket.connected && user?._id) {
-      console.log(`Menghantar whatsapp_connect_request untuk user: ${user._id}`);
+      console.log(`Sending whatsapp_connect_request for user: ${user._id}`);
       socket.emit('whatsapp_connect_request', user._id);
-      setConnectionStatus('Connecting...'); // Kemas kini status sementara
-      setRawQrString(null); // Reset QR sementara menunggu
-      toast.info("Meminta sambungan WhatsApp...");
+      setConnectionStatus('Connecting...'); // Update temporary status
+      setRawQrString(null); // Reset QR while waiting
+      toast.info("Requesting WhatsApp connection...");
     } else if (!socket || !socket.connected) {
-       toast.error("Sambungan ke pelayan belum sedia. Sila cuba sebentar lagi.");
+       toast.error("Connection to server not ready. Please try again later.");
        // Optionally try to reconnect socket here
        // connectSocket(); 
     } else if (!user?._id) {
-        toast.error("User ID tidak tersedia. Sila log masuk semula.");
+        toast.error("User ID not available. Please log in again.");
     }
   };
 
-  // Fungsi untuk meminta putus sambungan
+  // Function to request disconnection
   const handleDisconnectRequest = () => {
       if (socket && socket.connected) {
-          console.log("Menghantar whatsapp_disconnect_request");
+          console.log("Sending whatsapp_disconnect_request");
           socket.emit('whatsapp_disconnect_request');
-          toast.info("Meminta putus sambungan WhatsApp...");
-          // Status akan dikemaskini oleh listener 'whatsapp_status' -> 'disconnected'
+          toast.info("Requesting WhatsApp disconnection...");
+          // Status will be updated by the 'whatsapp_status' listener -> 'disconnected'
       } else {
-           toast.error("Sambungan ke pelayan tiada.");
+           toast.error("No connection to server.");
       }
   }
 
-  // Fungsi untuk memaparkan status dengan ikon
+  // Function to display status with icon
   const renderStatusDisplay = () => {
     let icon = <Loader2 className="animate-spin h-5 w-5 mr-2" />;
     let text = connectionStatus;
     let variant = "secondary";
-    let description = "Status sambungan WhatsApp anda.";
+    let description = "Your WhatsApp connection status.";
 
     switch (connectionStatus) {
       case 'connected':
         icon = <Wifi className="h-5 w-5 mr-2 text-green-600" />;
-        text = "Tersambung";
+        text = "Connected";
         variant = "success";
-        description = "WhatsApp anda sedang aktif dan sedia digunakan.";
+        description = "Your WhatsApp is active and ready to use.";
         break;
       case 'disconnected':
         icon = <WifiOff className="h-5 w-5 mr-2 text-red-600" />;
-        text = "Terputus";
+        text = "Disconnected";
         variant = "destructive";
-        description = "Sambungan WhatsApp tidak aktif. Sila sambungkan.";
+        description = "WhatsApp connection is inactive. Please connect.";
         break;
       case 'waiting_qr':
         icon = <QrCodeIcon className="h-5 w-5 mr-2 text-blue-600" />;
-        text = "Menunggu Imbasan QR";
+        text = "Waiting for QR Scan";
         variant = "outline";
-        description = "Sila imbas kod QR di bawah menggunakan aplikasi WhatsApp anda.";
+        description = "Please scan the QR code below using your WhatsApp application.";
         break;
       case 'Connecting...':
-         text = "Menyambung...";
+         text = "Connecting...";
          variant = "secondary";
-         description = "Sedang cuba menyambungkan ke WhatsApp...";
+         description = "Attempting to connect to WhatsApp...";
         break;
        case 'User not loaded':
           icon = <XCircle className="h-5 w-5 mr-2 text-yellow-600" />;
-          text = "Pengguna Belum Sedia";
+          text = "User Not Ready";
           variant = "secondary";
-          description = "Memuatkan maklumat pengguna...";
+          description = "Loading user information...";
           break;
        default:
         icon = <Loader2 className="animate-spin h-5 w-5 mr-2" />;
         variant = "secondary";
-        description = `Status: ${connectionStatus}`; // Tunjuk status sebenar jika tidak dikenali
+        description = `Status: ${connectionStatus}`; // Show actual status if unknown
         break;
     }
 
@@ -196,8 +196,8 @@ const WhatsappConnectPage = () => {
     <div className="container mx-auto p-4">
       <Card className="max-w-md mx-auto">
         <CardHeader>
-          <CardTitle>Sambungan WhatsApp</CardTitle>
-          <CardDescription>Urus sambungan akaun WhatsApp anda.</CardDescription>
+          <CardTitle>WhatsApp Connection</CardTitle>
+          <CardDescription>Manage your WhatsApp account connection.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center space-y-6">
           {renderStatusDisplay()}
@@ -211,24 +211,24 @@ const WhatsappConnectPage = () => {
           <div className="flex space-x-4">
             {connectionStatus === 'disconnected' && (
               <Button onClick={handleConnectRequest} disabled={!socketConnected || !user?._id}>
-                 <LinkIcon className="mr-2 h-4 w-4" /> Sambung / Imbas Semula
+                 <LinkIcon className="mr-2 h-4 w-4" /> Connect / Rescan
               </Button>
             )}
             {connectionStatus === 'connected' && (
                <Button variant="destructive" onClick={handleDisconnectRequest} disabled={!socketConnected}>
-                 <WifiOff className="mr-2 h-4 w-4" /> Putuskan Sambungan
+                 <WifiOff className="mr-2 h-4 w-4" /> Disconnect
               </Button>
             )}
-            {/* Tunjuk butang sambung jika status tidak menentu & socket bersambung */} 
+            {/* Show connect button if status is uncertain & socket is connected */} 
             {connectionStatus !== 'connected' && connectionStatus !== 'disconnected' && connectionStatus !== 'waiting_qr' && connectionStatus !== 'Connecting...' && socketConnected && (
                  <Button onClick={handleConnectRequest} disabled={!user?._id}>
-                     <LinkIcon className="mr-2 h-4 w-4" /> Cuba Sambung
+                     <LinkIcon className="mr-2 h-4 w-4" /> Try Connecting
                  </Button>
             )}
           </div>
 
            {!socketConnected && connectionStatus !== 'User not loaded' && (
-                <p className="text-xs text-red-500">Sambungan ke pelayan terputus. Cuba muat semula halaman.</p>
+                <p className="text-xs text-red-500">Connection to server lost. Try refreshing the page.</p>
             )}
 
         </CardContent>

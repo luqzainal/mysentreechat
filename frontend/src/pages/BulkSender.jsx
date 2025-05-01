@@ -25,8 +25,8 @@ const BulkSender = () => {
         const response = await api.get('/contacts');
         setContacts(response.data);
       } catch (error) {
-        console.error("Gagal mendapatkan senarai kenalan:", error);
-        toast.error("Gagal mendapatkan senarai kenalan.");
+        console.error("Failed to get contact list:", error);
+        toast.error("Failed to get contact list.");
       }
     };
     fetchContacts();
@@ -58,16 +58,16 @@ const BulkSender = () => {
   // Hantar mesej pukal
   const handleSendBulk = async () => {
     if (!message.trim()) {
-      toast.warning("Sila masukkan mesej.");
+      toast.warning("Please enter a message.");
       return;
     }
     if (selectedContacts.size === 0) {
-      toast.warning("Sila pilih sekurang-kurangnya satu kenalan.");
+      toast.warning("Please select at least one contact.");
       return;
     }
 
     setIsLoading(true);
-    setSendingStatus(null); // Reset status sebelum hantar
+    setSendingStatus(null); // Reset status before sending
     const contactIds = Array.from(selectedContacts);
 
     try {
@@ -76,12 +76,12 @@ const BulkSender = () => {
         contactIds,
       });
       setSendingStatus(response.data);
-      toast.success(response.data.message || "Proses penghantaran selesai.");
+      toast.success(response.data.message || "Sending process completed.");
     } catch (error) {
-      console.error("Gagal menghantar mesej pukal:", error);
-      const errorMessage = error.response?.data?.message || "Ralat berlaku semasa penghantaran.";
-      setSendingStatus({ message: `Gagal: ${errorMessage}`, results: null });
-      toast.error(`Gagal menghantar: ${errorMessage}`);
+      console.error("Failed to send bulk message:", error);
+      const errorMessage = error.response?.data?.message || "An error occurred during sending.";
+      setSendingStatus({ message: `Failed: ${errorMessage}`, results: null });
+      toast.error(`Send failed: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -94,26 +94,26 @@ const BulkSender = () => {
       <Card>
         <CardHeader>
           <CardTitle>Whatsapp Bulk Sender</CardTitle>
-          <CardDescription>Hantar mesej ke beberapa kenalan serentak.</CardDescription>
+          <CardDescription>Send messages to multiple contacts simultaneously.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="message">Mesej</Label>
+            <Label htmlFor="message">Message</Label>
             <Textarea
               id="message"
-              placeholder="Taip mesej anda di sini..."
+              placeholder="Type your message here..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={4}
               disabled={isLoading}
             />
             <p className="text-xs text-muted-foreground">
-               Gunakan format Spintax <code className="bg-muted px-1 py-0.5 rounded">{'{'}pilihan1|pilihan2{'}'}</code> untuk variasi mesej rawak (cth: <code className="bg-muted px-1 py-0.5 rounded">{'{'}Hai|Helo{'}'}</code>).
+               Use Spintax format <code className="bg-muted px-1 py-0.5 rounded">{"{" + "option1|option2" + "}"}</code> for random message variations (e.g., <code className="bg-muted px-1 py-0.5 rounded">{"{" + "Hi|Hello" + "}"}</code>).
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label>Pilih Kenalan</Label>
+            <Label>Select Contacts</Label>
             <ScrollArea className="h-72 w-full rounded-md border">
               <Table>
                 <TableHeader>
@@ -122,19 +122,19 @@ const BulkSender = () => {
                       <Checkbox
                         checked={isAllSelected}
                         onCheckedChange={handleSelectAll}
-                        aria-label="Pilih semua"
+                        aria-label="Select all"
                         disabled={isLoading || contacts.length === 0}
                       />
                     </TableHead>
-                    <TableHead>Nama</TableHead>
-                    <TableHead>Nombor Telefon</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Phone Number</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {contacts.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={3} className="h-24 text-center">
-                        Tiada kenalan ditemui.
+                        No contacts found.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -144,7 +144,7 @@ const BulkSender = () => {
                           <Checkbox
                             checked={selectedContacts.has(contact._id)}
                             onCheckedChange={() => handleSelectContact(contact._id)}
-                            aria-label={`Pilih ${contact.name}`}
+                            aria-label={`Select ${contact.name}`}
                             disabled={isLoading}
                           />
                         </TableCell>
@@ -157,14 +157,14 @@ const BulkSender = () => {
               </Table>
             </ScrollArea>
             <p className="text-sm text-muted-foreground">
-              Dipilih: {selectedContacts.size} / {contacts.length} kenalan.
+              Selected: {selectedContacts.size} / {contacts.length} contacts.
             </p>
           </div>
 
           {sendingStatus && (
             <Card className="bg-muted/40">
               <CardHeader>
-                <CardTitle className="text-lg">Keputusan Penghantaran</CardTitle>
+                <CardTitle className="text-lg">Sending Results</CardTitle>
                 <CardDescription>{sendingStatus.message}</CardDescription>
               </CardHeader>
               {sendingStatus.results && (
@@ -172,9 +172,9 @@ const BulkSender = () => {
                   <ScrollArea className="h-40">
                     <ul className="list-disc space-y-1 pl-5 text-sm">
                       {sendingStatus.results.map((result, index) => (
-                        <li key={index} className={result.status === 'Gagal' ? 'text-red-600' : 'text-green-600'}>
+                        <li key={index} className={result.status === 'Failed' ? 'text-red-600' : 'text-green-600'}>
                           {result.name} ({result.number}): {result.status}
-                          {result.status === 'Gagal' && result.error && ` - ${result.error}`}
+                          {result.status === 'Failed' && result.error && ` - ${result.error}`}
                         </li>
                       ))}
                     </ul>
@@ -187,7 +187,7 @@ const BulkSender = () => {
         </CardContent>
         <CardFooter>
           <Button onClick={handleSendBulk} disabled={isLoading || selectedContacts.size === 0}>
-            {isLoading ? 'Menghantar...' : 'Hantar Mesej Pukal'}
+            {isLoading ? 'Sending...' : 'Send Bulk Message'}
           </Button>
         </CardFooter>
       </Card>
