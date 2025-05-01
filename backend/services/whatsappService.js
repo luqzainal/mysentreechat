@@ -5,6 +5,7 @@ import OpenAI from 'openai'; // Import OpenAI
 import AutoresponderSetting from '../models/AutoresponderSetting.js'; // <-- Import model tetapan
 import User from '../models/User.js'; // Import User model
 import WhatsappConnection from '../models/WhatsappConnection.js'; // Import WhatsappConnection model
+import Message from '../models/Message.js'; // <-- Tambah import Message model
 import qrcode from 'qrcode';
 import { Boom } from '@hapi/boom';
 import path from 'path'; // Perlu path untuk __dirname dalam ES Modules
@@ -34,7 +35,25 @@ const getMessageText = (message) => {
   return message?.conversation || message?.extendedTextMessage?.text || '';
 };
 
-async function connectToWhatsApp(userId) {
+// Fungsi untuk menghantar mesej teks
+export async function sendMessage(jid, text) {
+    if (!sock || sock.user?.id === undefined) {
+        console.error('Attempted to send message but WhatsApp socket is not connected.');
+        throw new Error('WhatsApp is not connected. Please check the connection status.');
+    }
+    try {
+        console.log(`Sending message via service to ${jid}: ${text}`);
+        const sentMessageInfo = await sock.sendMessage(jid, { text: text });
+        console.log('Message sent successfully via service, info:', sentMessageInfo?.key);
+        return sentMessageInfo; // Kembalikan info mesej yang dihantar
+    } catch (error) {
+        console.error(`Error sending message to ${jid} via service:`, error);
+        // Throw ralat semula supaya controller boleh tangkap
+        throw new Error(error.message || 'Failed to send message via WhatsApp service.');
+    }
+}
+
+export async function connectToWhatsApp(userId) {
   // --- SEMAKAN HAD SAMBUNGAN --- 
   try {
       const user = await User.findById(userId);
@@ -203,74 +222,110 @@ async function connectToWhatsApp(userId) {
 
      const sender = msgInfo.key.remoteJid;
      const messageText = getMessageText(msgInfo.message);
+     const timestamp = new Date(msgInfo.messageTimestamp * 1000); // Convert Unix timestamp to JS Date
+     const messageId = msgInfo.key.id;
 
      console.log(`Mesej diterima dari ${sender} untuk user ${localUserId}: ${messageText}`);
 
-     // --- Logik Autoresponder --- 
+     // 1. Simpan mesej ke database
      try {
-       const settings = await AutoresponderSetting.findOne({ user: localUserId });
+         const newMessage = new Message({
+             user: localUserId,
+             chatJid: sender,
+             body: messageText,
+             timestamp: timestamp,
+             fromMe: false,
+             messageId: messageId,
+             status: 'received' // Status mesej diterima
+         });
+         await newMessage.save();
+         console.log(`Received message from ${sender} saved to DB for user ${localUserId}.`);
+     } catch (dbError) {
+         console.error(`Failed to save received message from ${sender} to DB for user ${localUserId}:`, dbError);
+         // Teruskan walaupun gagal simpan DB
+     }
 
-       // Semak jika autoresponder diaktifkan secara umum
-       if (settings && settings.isEnabled) {
-           let replyToSend = null;
+     // 2. Hantar mesej ke frontend melalui Socket.IO
+     if (globalIO) {
+         const messageData = {
+             id: messageId, // Guna ID mesej WA
+             sender: sender,
+             body: messageText,
+             timestamp: timestamp.toISOString(), // Hantar sebagai ISO string
+             fromMe: false
+         };
+         // Emit ke bilik user yang betul
+         globalIO.to(localUserId).emit('new_whatsapp_message', messageData);
+          console.log(`Emitted new_whatsapp_message to user room: ${localUserId}`);
+     }
 
-           // Jika guna AI dan ada API Key
-           if (settings.useAI && settings.openaiApiKey && messageText) {
-                console.log(`Autoresponder AI aktif untuk pengguna ${localUserId}. Memproses mesej...`);
-                try {
-                   const openai = new OpenAI({ apiKey: settings.openaiApiKey });
-                   const completion = await openai.chat.completions.create({
-                     model: "gpt-3.5-turbo",
-                     messages: [
-                       { role: "system", content: settings.prompt },
-                       { role: "user", content: messageText }
-                     ],
-                   });
-                   const aiReply = completion.choices[0]?.message?.content;
-                   
-                   if (aiReply) {
-                       replyToSend = aiReply; // Guna balasan AI
-                       console.log(`Balasan dari OpenAI: ${replyToSend}`);
-                   } else {
-                       console.log('Tiada balasan diterima dari OpenAI. Guna default reply jika ada.');
-                       // Jika AI gagal, fallback ke default reply (jika ada)
-                       if (settings.defaultReply) {
-                            replyToSend = processSpintax(settings.defaultReply); // Proses spintax pada default
-                            console.log(`Menggunakan default reply (spun): ${replyToSend}`);
-                       }
+     // 3. Logik Autoresponder (sedia ada)
+     try {
+         const settings = await AutoresponderSetting.findOne({ user: localUserId });
+         if (settings && settings.isEnabled) {
+             let replyToSend = null;
+             if (settings.useAI && settings.openaiApiKey && messageText) {
+                 console.log(`AI Autoresponder active for user ${localUserId}. Processing...`);
+                 try {
+                     const openai = new OpenAI({ apiKey: settings.openaiApiKey });
+                     const completion = await openai.chat.completions.create({
+                         model: "gpt-3.5-turbo",
+                         messages: [
+                             { role: "system", content: settings.prompt },
+                             { role: "user", content: messageText }
+                         ],
+                     });
+                     const aiReply = completion.choices[0]?.message?.content;
+                     if (aiReply) {
+                         replyToSend = aiReply;
+                         console.log(`OpenAI Reply: ${replyToSend}`);
+                     } else {
+                         console.log('No reply from OpenAI. Using default if available.');
+                         if (settings.defaultReply) {
+                              replyToSend = processSpintax(settings.defaultReply);
+                              console.log(`Using default reply (spun): ${replyToSend}`);
+                         }
+                     }
+                 } catch (openaiError) {
+                     console.error('OpenAI API error:', openaiError.message);
+                     if (settings.defaultReply) {
+                         replyToSend = processSpintax(settings.defaultReply);
+                         console.log(`Using default reply (spun) after AI error: ${replyToSend}`);
+                     }
+                 }
+             } else if (settings.defaultReply) {
+                 replyToSend = processSpintax(settings.defaultReply);
+                 console.log(`Using default reply (spun): ${replyToSend}`);
+             }
+
+             if (replyToSend && sock) { // Pastikan sock masih wujud
+                  console.log(`Sending auto-reply to ${sender}: ${replyToSend}`);
+                  // Tidak perlu guna fungsi sendMessage() di sini untuk elak infinite loop jika autoresponder balas diri sendiri
+                  await sock.sendMessage(sender, { text: replyToSend });
+                   // Simpan juga mesej auto-reply ke DB?
+                    try {
+                       const autoReplyMessage = new Message({
+                           user: localUserId,
+                           chatJid: sender,
+                           body: replyToSend,
+                           timestamp: new Date(),
+                           fromMe: true,
+                           messageId: `auto-${Date.now()}`, // ID sementara
+                           status: 'sent'
+                       });
+                       await autoReplyMessage.save();
+                   } catch (dbSaveError) {
+                       console.error("Failed to save auto-reply message to DB:", dbSaveError);
                    }
-                } catch (openaiError) {
-                   console.error('Ralat semasa menghubungi OpenAI:', openaiError.message);
-                   // Jika AI ralat, fallback ke default reply (jika ada)
-                   if (settings.defaultReply) {
-                       replyToSend = processSpintax(settings.defaultReply); // Proses spintax pada default
-                       console.log(`Menggunakan default reply (spun) selepas ralat AI: ${replyToSend}`);
-                   }
-                }
-           } 
-           // Jika TIDAK guna AI ATAU tiada API Key, guna default reply (jika ada)
-           else if (settings.defaultReply) { 
-               replyToSend = processSpintax(settings.defaultReply); // Proses spintax pada default
-               console.log(`Menggunakan default reply (spun): ${replyToSend}`);
-           }
-
-           // Hantar balasan jika ada
-           if (replyToSend) {
-               await sock.sendMessage(sender, { text: replyToSend });
-               console.log(`Balasan dihantar ke ${sender}`);
-           } else {
-               console.log('Tiada balasan (sama ada AI atau default) untuk dihantar.');
-           }
-
-       } else {
-            if (!settings) console.log(`Tiada tetapan autoresponder ditemui untuk pengguna ${localUserId}.`);
-            else if (!settings.isEnabled) console.log(`Autoresponder tidak aktif untuk pengguna ${localUserId}.`);
-       }
+             }
+         } else {
+              if (!settings) console.log(`Tiada tetapan autoresponder ditemui untuk pengguna ${localUserId}.`);
+              else if (!settings.isEnabled) console.log(`Autoresponder tidak aktif untuk pengguna ${localUserId}.`);
+         }
 
      } catch (dbError) {
        console.error('Ralat mendapatkan tetapan autoresponder dari DB:', dbError);
      }
-     // --- Akhir Logik Autoresponder ---
    });
 
   console.log(`Listener untuk pengguna ${userId} telah disediakan.`);
@@ -347,4 +402,14 @@ export function initializeWhatsAppService(io) {
 // Fungsi untuk dapatkan instance sock (mungkin perlu diubah suai untuk multi-instance)
 export function getWhatsAppSocket() {
   return sock;
-} 
+}
+
+// Buang blok export di bawah ini
+/*
+export {
+    connectToWhatsApp,
+    sendMessage, 
+    initializeWhatsAppService,
+    // getWhatsAppSocket 
+}; 
+*/ 

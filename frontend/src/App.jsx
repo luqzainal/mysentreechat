@@ -16,6 +16,7 @@ import MembershipPage from './pages/MembershipPage';
 import AccountPage from './pages/AccountPage';
 import MediaStoragePage from './pages/MediaStoragePage';
 import UserListPage from './pages/admin/UserListPage'; // Import halaman admin
+import ChatPage from './pages/ChatPage'; // <-- Import ChatPage baru
 
 // Import Icons
 import {
@@ -63,12 +64,13 @@ const Header = () => {
   // Pindahkan menuItems ke sini
   const menuItems = [
     { to: "/", icon: LayoutDashboard, title: "Dashboard" },
-    { to: "/contacts", icon: Users, title: "Kenalan" },
+    { to: "/chat", icon: MessageSquare, title: "Chat" }, // <-- Tambah item menu Chat
+    { to: "/contacts", icon: Users, title: "Contacts" },
     { to: "/bulk-sender", icon: Send, title: "Bulk Sender" },
     { to: "/autoresponder", icon: Bot, title: "Autoresponder" },
-    { to: "/media-storage", icon: ImageIcon, title: "Media" },
-    { to: "/membership", icon: BadgeInfo, title: "Keahlian" },
-    { to: "/account", icon: UserCog, title: "Akaun" },
+    { to: "/media-storage", icon: ImageIcon, title: "Media Storage" },
+    { to: "/membership", icon: BadgeInfo, title: "Membership" },
+    { to: "/account", icon: UserCog, title: "Account" },
   ];
 
   // Tambah pautan admin jika role === 'admin'
@@ -140,10 +142,10 @@ const Header = () => {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                 <Link to="/account"> <UserCog className="mr-2 h-4 w-4" /> Profil Akaun</Link>
+                 <Link to="/account"> <UserCog className="mr-2 h-4 w-4" /> Account Profile</Link>
               </DropdownMenuItem>
                <DropdownMenuItem asChild>
-                 <Link to="/membership"><BadgeInfo className="mr-2 h-4 w-4" /> Keahlian</Link>
+                 <Link to="/membership"><BadgeInfo className="mr-2 h-4 w-4" /> Membership</Link>
               </DropdownMenuItem>
               
               {/* Pautan Admin (jika user admin) */} 
@@ -151,14 +153,14 @@ const Header = () => {
                   <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem asChild>
-                          <Link to="/admin/users"><ShieldCheck className="mr-2 h-4 w-4" /> Pengurusan Pengguna</Link>
+                          <Link to="/admin/users"><ShieldCheck className="mr-2 h-4 w-4" /> Membership Management</Link>
                       </DropdownMenuItem>
                   </>
               )}
 
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-700 focus:bg-red-100/50 cursor-pointer">
-                <LogOut className="mr-2 h-4 w-4" /> Log Keluar
+                <LogOut className="mr-2 h-4 w-4" /> Log Out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -272,13 +274,14 @@ function App() {
 
       {/* Laluan untuk Aplikasi Utama (dilindungi oleh MainLayout) */}
       <Route element={<MainLayout />}>
-        <Route path="/" element={<DashboardPage />} />
+        <Route index element={<DashboardPage />} />
+        <Route path="/chat" element={<ChatPage />} /> {/* <-- Tambah route untuk ChatPage */}
         <Route path="/contacts" element={<ContactPage />} />
         <Route path="/bulk-sender" element={<BulkSender />} />
         <Route path="/autoresponder" element={<AutoresponderPage />} />
+        <Route path="/media-storage" element={<MediaStoragePage />} />
         <Route path="/membership" element={<MembershipPage />} />
         <Route path="/account" element={<AccountPage />} />
-        <Route path="/media-storage" element={<MediaStoragePage />} />
 
         {/* Laluan Admin (dilindungi) */}
         <Route element={<AdminRouteGuard />}> { /* Bungkus laluan admin */}

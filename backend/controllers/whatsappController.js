@@ -1,6 +1,8 @@
 import Contact from '../models/Contact.js';
+import Message from '../models/Message.js'; // <-- Import model Message
 // import { sock } from '../services/whatsappService.js'; // Buang import sock
-import { getWhatsAppSocket } from '../services/whatsappService.js'; // Import fungsi getter
+import { getWhatsAppSocket } from '../services/whatsappService.js';
+import { sendMessage as sendWhatsappMessage } from '../services/whatsappService.js'; // Import & rename secara berasingan
 import { processSpintax } from '../utils/spintaxUtils.js'; // Import fungsi spintax
 
 // Fungsi helper untuk format nombor ke JID WhatsApp
@@ -22,64 +24,143 @@ const sendBulkMessage = async (req, res) => {
   const userId = req.user._id; // Dari middleware protect
 
   if (!message || !contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
-    return res.status(400).json({ message: 'Mesej dan sekurang-kurangnya satu ID kenalan diperlukan.' });
+    return res.status(400).json({ message: 'Message and at least one contact ID are required.' });
   }
 
-  // Dapatkan instance sock semasa
   const currentSock = getWhatsAppSocket();
 
-  // Semak jika sock wujud dan bersambung
   if (!currentSock || currentSock.user?.id === undefined) { 
-     return res.status(400).json({ message: 'Sambungan WhatsApp tidak aktif. Sila sambung di Dashboard.' });
+     return res.status(400).json({ message: 'WhatsApp connection is not active. Please connect on the Dashboard.' });
   }
 
   try {
-    // Dapatkan nombor telefon kenalan yang dipilih milik pengguna
     const contacts = await Contact.find({ 
       _id: { $in: contactIds }, 
       user: userId 
-    }).select('phoneNumber name'); // Pilih hanya nombor telefon & nama
+    }).select('phoneNumber name');
 
     if (contacts.length === 0) {
-      return res.status(404).json({ message: 'Tiada kenalan sah ditemui untuk ID yang diberikan.' });
+      return res.status(404).json({ message: 'No valid contacts found for the provided IDs.' });
     }
 
     let successCount = 0;
     let failCount = 0;
     const results = [];
 
-    // Hantar mesej satu per satu dengan delay
     for (const contact of contacts) {
-       // Ambil phoneNumber asal yang disimpan (patutnya sudah ada @c.us)
-      // const targetJid = formatToJid(contact.phoneNumber);
-      const targetJid = contact.phoneNumber; // Anggap phoneNumber dalam DB sudah dalam format JID
+      const targetJid = contact.phoneNumber;
       try {
-        // Proses spintax pada mesej SEBELUM menghantar
         const spunMessage = processSpintax(message);
-        console.log(`Menghantar mesej (spun) ke ${contact.name} (${targetJid}): ${spunMessage}`);
+        console.log(`Sending bulk message (spun) to ${contact.name} (${targetJid}): ${spunMessage}`);
         
-        // Hantar mesej yang telah diproses spintax
-        await currentSock.sendMessage(targetJid, { text: spunMessage });
-        results.push({ name: contact.name, number: contact.phoneNumber, status: 'Berjaya' });
+        // Guna fungsi dari service
+        await sendWhatsappMessage(targetJid, spunMessage);
+        results.push({ name: contact.name, number: contact.phoneNumber, status: 'Success' });
         successCount++;
       } catch (error) {
-        console.error(`Gagal menghantar ke ${targetJid}:`, error);
-        results.push({ name: contact.name, number: contact.phoneNumber, status: 'Gagal', error: error.message });
+        console.error(`Failed to send bulk to ${targetJid}:`, error);
+        results.push({ name: contact.name, number: contact.phoneNumber, status: 'Failed', error: error.message });
         failCount++;
       }
-      // Tambah delay antara mesej (cth., 1-3 saat) - SANGAT PENTING!
       await delay(Math.random() * 2000 + 1000); 
     }
 
     res.json({
-        message: `Proses penghantaran selesai. Berjaya: ${successCount}, Gagal: ${failCount}`,
+        message: `Sending process completed. Success: ${successCount}, Failed: ${failCount}`,
         results: results
     });
 
   } catch (error) {
-    console.error("Ralat dalam proses hantar pukal:", error);
-    res.status(500).json({ message: 'Ralat pelayan semasa menghantar mesej pukal.' });
+    console.error("Error in bulk send process:", error);
+    res.status(500).json({ message: 'Server error during bulk message sending.' });
   }
 };
 
-export { sendBulkMessage }; 
+// @desc    Dapatkan sejarah chat dengan nombor telefon tertentu
+// @route   GET /whatsapp/chat/:phoneNumber
+// @access  Private
+const getChatHistory = async (req, res) => {
+  const { phoneNumber } = req.params;
+  const userId = req.user._id;
+
+  if (!phoneNumber) {
+    return res.status(400).json({ message: 'Phone number parameter is required.' });
+  }
+
+  // Pastikan format JID yang betul
+  const chatJid = formatToJid(phoneNumber);
+
+  try {
+    // Dapatkan mesej dari DB yang melibatkan pengguna ini dan nombor telefon ini
+    // Anggap `user` field dalam Message model merujuk kepada pengguna aplikasi kita
+    // dan `chatJid` merujuk kepada nombor WhatsApp lawan bicara
+    const messages = await Message.find({
+      user: userId,
+      chatJid: chatJid, 
+    })
+    .sort({ timestamp: 1 }) // Susun ikut timestamp
+    .limit(100); // Hadkan bilangan mesej (optional)
+
+    // Format mesej mengikut keperluan frontend { id, body, timestamp, fromMe }
+    const formattedMessages = messages.map(msg => ({
+        id: msg._id, // Guna _id dari MongoDB
+        body: msg.body,
+        timestamp: msg.timestamp,
+        fromMe: msg.fromMe // Medan ini perlu wujud dalam model Message
+    }));
+
+    res.json(formattedMessages);
+
+  } catch (error) {
+    console.error(`Error fetching chat history for ${chatJid}:`, error);
+    res.status(500).json({ message: 'Server error fetching chat history.' });
+  }
+};
+
+// @desc    Hantar mesej individu
+// @route   POST /whatsapp/send
+// @access  Private
+const sendMessage = async (req, res) => {
+  const { to, message } = req.body;
+  const userId = req.user._id;
+
+  if (!to || !message) {
+    return res.status(400).json({ message: 'Recipient number (to) and message are required.' });
+  }
+
+  // Pastikan format JID yang betul
+  const targetJid = formatToJid(to);
+
+  try {
+    // Guna fungsi dari whatsappService
+    const sentMessageInfo = await sendWhatsappMessage(targetJid, message);
+    
+    // Selepas berjaya hantar, simpan ke database (jika perlu)
+     try {
+         const newMessage = new Message({
+             user: userId,
+             chatJid: targetJid,
+             body: message,
+             timestamp: new Date(), // Guna timestamp semasa
+             fromMe: true,
+             messageId: sentMessageInfo?.key?.id, // Simpan ID mesej WhatsApp jika ada
+             status: 'sent' // Status mesej
+         });
+         await newMessage.save();
+         console.log(`Sent message to ${targetJid} saved to DB.`);
+     } catch (dbError) {
+         console.error(`Failed to save sent message for ${targetJid} to DB:`, dbError);
+         // Jangan gagalkan request utama hanya kerana gagal simpan DB,
+         // tapi mungkin log atau hantar notifikasi
+     }
+
+    res.status(200).json({ message: 'Message sent successfully.', messageId: sentMessageInfo?.key?.id });
+
+  } catch (error) {
+    console.error(`Error sending message to ${targetJid}:`, error);
+    // Hantar ralat yang lebih spesifik jika boleh (cth., dari whatsappService)
+    res.status(500).json({ message: error.message || 'Failed to send message.' });
+  }
+};
+
+export { sendBulkMessage, getChatHistory, sendMessage }; // <-- Pastikan semua dieksport 
