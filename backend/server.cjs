@@ -23,9 +23,14 @@ connectDB();
 
 const app = express();
 const server = http.createServer(app);
+
+// Dapatkan URL frontend dari .env atau default ke port dev
+const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
+console.log(`Allowed CORS origin for Socket.IO: ${allowedOrigin}`); // Log untuk pengesahan
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: allowedOrigin, 
     methods: ["GET", "POST"]
   }
 });
