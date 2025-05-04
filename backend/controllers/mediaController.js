@@ -1,14 +1,15 @@
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import Media from '../models/Media.js';
-import { fileURLToPath } from 'url';
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const Media = require('../models/Media.js');
+const { fileURLToPath } = require('url');
 
-// Dapatkan __dirname dalam ES Module
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// __filename dan __dirname sudah tersedia dalam CommonJS
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
 
 // Tentukan direktori penyimpanan media
+// Gunakan __dirname global terus
 const uploadDir = path.join(__dirname, '../uploads/media');
 
 // Pastikan direktori wujud, jika tidak, ciptakannya
@@ -155,5 +156,10 @@ const deleteMedia = async (req, res) => {
   }
 };
 
-
-export { uploadMedia, getMediaList, deleteMedia }; 
+module.exports = {
+  // Export semua fungsi controller di sini
+  uploadMedia,
+  getMediaList,
+  deleteMedia,
+  upload
+}; 

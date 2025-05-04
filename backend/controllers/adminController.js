@@ -1,97 +1,93 @@
-import User from '../models/User.js';
+const User = require('../models/User.js');
+const WhatsappConnection = require('../models/WhatsappConnection.js');
+const Campaign = require('../models/Campaign.js');
+const Message = require('../models/Message.js');
+const asyncHandler = require('../middleware/asyncHandler.js');
 
-// @desc    Dapatkan semua pengguna (oleh Admin)
+// @desc    Dapatkan semua pengguna (Admin sahaja)
 // @route   GET /api/admin/users
 // @access  Private/Admin
-const getAllUsers = async (req, res) => {
-    try {
-        // Dapatkan semua pengguna, kecualikan medan kata laluan
-        const users = await User.find({}).select('-password');
-        res.json(users);
-    } catch (error) {
-        console.error('Ralat mendapatkan pengguna:', error);
-        res.status(500).json({ message: 'Ralat pelayan dalaman' });
-    }
-};
+const getAllUsers = asyncHandler(async (req, res) => {
+    // Pastikan hanya admin yang boleh akses (perlu middleware admin)
+    const users = await User.find({}).select('-password'); // Jangan hantar password
+    res.json(users);
+});
 
-// @desc    Kemaskini pelan keahlian pengguna (oleh Admin)
-// @route   PUT /api/admin/users/:id/plan
+// @desc    Dapatkan data pengguna spesifik by ID (Admin sahaja)
+// @route   GET /api/admin/users/:id
 // @access  Private/Admin
-const updateUserPlan = async (req, res) => {
-    try {
-        const { plan } = req.body; // Ambil pelan baru dari body
-        const userIdToUpdate = req.params.id; // Ambil ID pengguna dari URL
-
-        // Validasi input - pastikan pelan ada dan mungkin jenis yang dibenarkan
-        const allowedPlans = ['Free', 'Basic', 'Pro']; // Sesuaikan dengan pelan anda
-        if (!plan || !allowedPlans.includes(plan)) {
-            return res.status(400).json({ message: 'Pelan tidak sah atau tidak disediakan.' });
-        }
-
-        const user = await User.findById(userIdToUpdate);
-
-        if (!user) {
-            return res.status(404).json({ message: 'Pengguna tidak ditemui.' });
-        }
-
-        // Kemaskini pelan pengguna
-        user.membershipPlan = plan;
-        await user.save();
-
-        // Kembalikan data pengguna yang dikemaskini (tanpa password)
-        const updatedUser = await User.findById(userIdToUpdate).select('-password');
-        res.json(updatedUser);
-
-    } catch (error) {
-        console.error(`Ralat mengemaskini pelan pengguna ${req.params.id}:`, error);
-        // Handle ralat validasi jika ada
-        if (error.name === 'ValidationError') {
-            return res.status(400).json({ message: 'Ralat validasi', errors: error.errors });
-        }
-        res.status(500).json({ message: 'Ralat pelayan dalaman semasa mengemaskini pelan.' });
+const getUserById = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id).select('-password');
+    if (user) {
+        res.json(user);
+    } else {
+        res.status(404);
+        throw new Error('Pengguna tidak ditemui');
     }
-};
+});
 
-// @desc    Tukar peranan pengguna (oleh Admin)
-// @route   PUT /api/admin/users/:id/role
+// @desc    Kemas kini data pengguna (Admin sahaja)
+// @route   PUT /api/admin/users/:id
 // @access  Private/Admin
-const changeUserRole = async (req, res) => {
-    try {
-        const { role } = req.body; // Ambil role baru dari body ('user' atau 'admin')
-        const userIdToUpdate = req.params.id; // Ambil ID pengguna dari URL
-        const requestingAdminId = req.user._id; // ID admin yang membuat permintaan
+const updateUserById = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
 
-        // Validasi input role
-        const allowedRoles = ['user', 'admin'];
-        if (!role || !allowedRoles.includes(role)) {
-            return res.status(400).json({ message: 'Peranan tidak sah. Pilih \'user\' atau \'admin\'.' });
+    if (user) {
+        user.name = req.body.name || user.name;
+        user.email = req.body.email || user.email;
+        user.role = req.body.role || user.role;
+        user.membershipPlan = req.body.membershipPlan || user.membershipPlan;
+        // Kemaskini password jika ada (akan di-hash oleh pre-save hook)
+        if (req.body.password) {
+            user.password = req.body.password;
         }
 
-        // Elakkan admin menukar peranannya sendiri melalui endpoint ini
-        if (userIdToUpdate === requestingAdminId.toString()) {
-             return res.status(400).json({ message: 'Tidak boleh menukar peranan akaun admin sendiri.' });
-        }
-
-        const user = await User.findById(userIdToUpdate);
-
-        if (!user) {
-            return res.status(404).json({ message: 'Pengguna tidak ditemui.' });
-        }
-
-        // Kemaskini role pengguna
-        user.role = role;
-        // Biarkan pre-save hook uruskan penetapan pelan Pro jika role menjadi 'admin'
-        await user.save(); 
-
-        // Kembalikan data pengguna yang dikemaskini (tanpa password)
-        const updatedUser = await User.findById(userIdToUpdate).select('-password');
-        res.json(updatedUser);
-
-    } catch (error) {
-        console.error(`Ralat menukar peranan pengguna ${req.params.id}:`, error);
-        res.status(500).json({ message: 'Ralat pelayan dalaman semasa menukar peranan.' });
+        const updatedUser = await user.save();
+        res.json({
+            _id: updatedUser._id,
+            name: updatedUser.name,
+            email: updatedUser.email,
+            role: updatedUser.role,
+            membershipPlan: updatedUser.membershipPlan,
+        });
+    } else {
+        res.status(404);
+        throw new Error('Pengguna tidak ditemui');
     }
-};
+});
 
-// Kemaskini export untuk masukkan fungsi baru
-export { getAllUsers, updateUserPlan, changeUserRole }; 
+// @desc    Padam pengguna (Admin sahaja)
+// @route   DELETE /api/admin/users/:id
+// @access  Private/Admin
+const deleteUserById = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
+
+    if (user) {
+        // TODO: Pertimbangkan apa yang perlu berlaku pada data berkaitan pengguna ini
+        // (devices, campaigns, messages, etc.) - Perlu cascade delete atau set null?
+        // Ini operasi berbahaya, mungkin lebih baik deactivate dari delete?
+        
+        // Contoh: Padam semua data berkaitan (PERLU HATI-HATI)
+        /*
+        await WhatsappConnection.deleteMany({ userId: user._id });
+        await Campaign.deleteMany({ userId: user._id });
+        await Message.deleteMany({ user: user._id });
+        // Padam juga settings jika ada
+        await Setting.deleteOne({ userId: user._id }); 
+        */
+
+        await User.deleteOne({ _id: user._id }); // Padam pengguna
+        res.json({ message: 'Pengguna berjaya dipadam' });
+    } else {
+        res.status(404);
+        throw new Error('Pengguna tidak ditemui');
+    }
+});
+
+// Guna module.exports
+module.exports = {
+    getAllUsers,
+    getUserById,
+    updateUserById,
+    deleteUserById
+}; 

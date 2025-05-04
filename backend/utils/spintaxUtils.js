@@ -21,4 +21,4 @@ function processSpintax(text) {
 }
 
 // Eksport fungsi supaya boleh diguna di tempat lain
-export { processSpintax }; 
+module.exports = { processSpintax }; 

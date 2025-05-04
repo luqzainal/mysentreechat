@@ -1,14 +1,14 @@
-import express from 'express';
-import { 
-  getContacts, 
-  addContact, 
-  deleteContact, 
-  uploadContacts 
-} from '../controllers/contactController.js';
-import { protect } from '../middleware/authMiddleware.js';
-import multer from 'multer';
-
+const express = require('express');
 const router = express.Router();
+const {
+  getContacts,
+  addContact,
+  deleteContact,
+  uploadContacts
+} = require('../controllers/contactController.js');
+const { protect } = require('../middleware/authMiddleware.js');
+const multer = require('multer');
+const { uploadCsv } = require('../middleware/uploadMiddleware.js');
 
 // Konfigurasi Multer untuk simpanan memori dan penapis fail Excel
 const storage = multer.memoryStorage();
@@ -40,6 +40,6 @@ router.route('/:id')
 
 // Laluan baru untuk muat naik fail Excel
 // Guna upload.single('file') - 'file' mesti padan dengan nama field dalam FormData frontend
-router.post('/upload', upload.single('file'), uploadContacts);
+router.post('/upload', uploadCsv, uploadContacts);
 
-export default router; 
+module.exports = router; 

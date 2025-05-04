@@ -1,5 +1,5 @@
-import Contact from '../models/Contact.js';
-import xlsx from 'xlsx'; // Import xlsx
+const Contact = require('../models/Contact.js');
+const xlsx = require('xlsx');
 
 // @desc    Dapatkan semua kenalan pengguna
 // @route   GET /contacts
@@ -135,4 +135,10 @@ const uploadContacts = async (req, res) => {
     }
 };
 
-export { getContacts, addContact, deleteContact, uploadContacts }; 
+module.exports = {
+  // Export semua fungsi controller di sini
+  getContacts,
+  addContact,
+  deleteContact,
+  uploadContacts,
+}; 

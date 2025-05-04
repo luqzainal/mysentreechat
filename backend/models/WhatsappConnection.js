@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const whatsappConnectionSchema = new mongoose.Schema(
   {
@@ -50,6 +50,4 @@ const whatsappConnectionSchema = new mongoose.Schema(
 // Tambah compound index selepas schema definition
 whatsappConnectionSchema.index({ userId: 1, phoneNumber: 1 }, { unique: true });
 
-const WhatsappConnection = mongoose.model('WhatsappConnection', whatsappConnectionSchema);
-
-export default WhatsappConnection; 
+module.exports = mongoose.model('WhatsappConnection', whatsappConnectionSchema); 

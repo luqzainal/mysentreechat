@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const autoresponderSettingSchema = mongoose.Schema(
   {
@@ -33,6 +33,4 @@ const autoresponderSettingSchema = mongoose.Schema(
   }
 );
 
-const AutoresponderSetting = mongoose.model('AutoresponderSetting', autoresponderSettingSchema);
-
-export default AutoresponderSetting; 
+module.exports = mongoose.model('AutoresponderSetting', autoresponderSettingSchema); 

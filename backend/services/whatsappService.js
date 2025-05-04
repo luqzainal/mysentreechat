@@ -1,19 +1,25 @@
-import pkg from 'whatsapp-web.js'; // Import default dari CJS
-const { Client, LocalAuth, MessageMedia } = pkg; // Destructure named exports
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal'); // Untuk debug QR di terminal
+// Tukar import kepada require dan tambah .js
+const WhatsappDevice = require('../models/WhatsappDevice.js');
 
-import OpenAI from 'openai'; // Import OpenAI
-import AutoresponderSetting from '../models/AutoresponderSetting.js'; // <-- Import model tetapan
-import User from '../models/User.js'; // Import User model
-import WhatsappConnection from '../models/WhatsappConnection.js'; // Import WhatsappConnection model
-import Message from '../models/Message.js'; // <-- Tambah import Message model
-import qrcode from 'qrcode';
-import path from 'path'; // Perlu path untuk __dirname dalam ES Modules
-import { fileURLToPath } from 'url';
-import { processSpintax } from '../utils/spintaxUtils.js'; // Import fungsi spintax
+// Tukar import model lain kepada require
+// import OpenAI from 'openai'; // Biarkan jika OpenAI guna ES Module
+const AutoresponderSetting = require('../models/AutoresponderSetting.js');
+const User = require('../models/User.js');
+const WhatsappConnection = require('../models/WhatsappConnection.js');
+const Message = require('../models/Message.js');
+// import path from 'path'; // Mungkin perlu require jika fail ini CommonJS
+// import { fileURLToPath } from 'url';
+// import { processSpintax } from '../utils/spintaxUtils.js'; // Tukar jika utils guna CommonJS
+const path = require('path');
+const { fileURLToPath } = require('url'); // url sepatutnya boleh di-require
+const { processSpintax } = require('../utils/spintaxUtils.js');
 
-// Dapatkan __dirname dalam ES Module
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Dapatkan __dirname (kod ini mungkin tidak berfungsi dengan require, perlu disemak)
+// const __filename = fileURLToPath(import.meta.url); // import.meta.url tidak wujud dalam CommonJS
+// const __dirname = path.dirname(__filename);
+// Guna __dirname terus dalam CommonJS
 
 // Pemetaan Pelan ke Had Sambungan
 const PLAN_LIMITS = {
@@ -29,7 +35,7 @@ const clients = new Map(); // Map<userId, Client>
 let globalIO = null; // Simpan instance IO global
 
 // Fungsi untuk menghantar mesej teks
-export async function sendMessage(userId, jid, text) {
+async function sendMessage(userId, jid, text) {
     const client = clients.get(userId); // Dapatkan client spesifik untuk user
     if (!client) {
         console.error(`Attempted to send message for user ${userId} but client is not initialized.`);
@@ -49,7 +55,7 @@ export async function sendMessage(userId, jid, text) {
 }
 
 // Fungsi untuk menyambung ke WhatsApp
-export async function connectToWhatsApp(userId) {
+async function connectToWhatsApp(userId) {
     if (clients.has(userId)) {
         console.log(`Client untuk user ${userId} sudah wujud atau sedang cuba bersambung.`);
         // Mungkin hantar status semasa jika perlu
@@ -399,17 +405,24 @@ export async function connectToWhatsApp(userId) {
 
 
     // Mulakan proses inisialisasi client
-    client.initialize().catch(err => {
+    client.initialize().catch(async err => {
         console.error(`Gagal menginisialisasi client untuk user ${userId}:`, err);
          // Pastikan client dihapus jika gagal initialize
          clients.delete(userId);
          // Kemaskini status DB ke disconnected/error
           try {
-             WhatsappConnection.updateOne({ userId, status: 'connecting' }, { status: 'disconnected' });
+             await WhatsappConnection.updateOne({ userId, status: 'connecting' }, { status: 'disconnected' });
           } catch(dbErr) {/* ignore */}
         if (globalIO) {
             globalIO.to(userId).emit('whatsapp_status', 'disconnected');
              globalIO.to(userId).emit('error_message', `Failed to initialize WhatsApp connection: ${err.message}`);
+        }
+        // **KEMASKINI DB**: Pastikan status error jika initialize gagal
+        try {
+            await WhatsappDevice.updateOne({ userId: userId }, { connectionStatus: 'error' });
+            console.log(`DB status updated to error (initialize failed) for user ${userId}`);
+        } catch (dbError) {
+             console.error(`Error updating DB status to error (initialize failed) for user ${userId}:`, dbError);
         }
     });
 
@@ -417,7 +430,7 @@ export async function connectToWhatsApp(userId) {
 }
 
 // Terima userId semasa initialize
-export function initializeWhatsAppService(io) {
+function initializeWhatsAppService(io) {
   globalIO = io;
   console.log('Servis WhatsApp diinisialisasi dengan Socket.IO');
 
@@ -520,12 +533,12 @@ export function initializeWhatsAppService(io) {
 }
 
 // Fungsi untuk dapatkan instance client WhatsApp yang aktif untuk user ID tertentu
-export function getWhatsAppSocket(userId) {
+function getWhatsAppSocket(userId) {
   return clients.get(userId); // Kembalikan client dari Map
 }
 
 // Fungsi untuk membersihkan semua sesi client (cth: semasa server shutdown)
-export async function cleanupWhatsAppClients() {
+async function cleanupWhatsAppClients() {
     console.log("Membersihkan semua client WhatsApp...");
     const cleanupPromises = [];
     for (const [userId, client] of clients.entries()) {
@@ -540,4 +553,13 @@ export async function cleanupWhatsAppClients() {
 
 // Pastikan cleanup dijalankan semasa server berhenti
 process.on('SIGINT', cleanupWhatsAppClients);
-process.on('SIGTERM', cleanupWhatsAppClients); 
+process.on('SIGTERM', cleanupWhatsAppClients);
+
+// Gantikan export ES Module dengan module.exports
+module.exports = {
+  sendMessage,
+  connectToWhatsApp,
+  initializeWhatsAppService,
+  getWhatsAppSocket,
+  cleanupWhatsAppClients
+}; 

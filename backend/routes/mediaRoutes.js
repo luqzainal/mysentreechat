@@ -1,20 +1,23 @@
-import express from 'express';
+const express = require('express');
 const router = express.Router();
-import { 
-    uploadMedia, 
-    getMediaList, 
-    deleteMedia 
-} from '../controllers/mediaController.js';
-import { protect } from '../middleware/authMiddleware.js';
+const {
+    getMediaList,
+    uploadMedia,
+    deleteMedia
+} = require('../controllers/mediaController.js');
+const { protect } = require('../middleware/authMiddleware.js');
+const { uploadMedia: uploadMiddleware } = require('../middleware/uploadMiddleware.js');
 
-// GET /media - Dapatkan senarai media pengguna
-router.get('/', protect, getMediaList);
+// Lindungi semua laluan media
+router.use(protect);
 
-// POST /media/upload - Muat naik fail media baru
-// Middleware 'protect' akan pastikan req.user._id wujud untuk multer
-router.post('/upload', protect, uploadMedia);
+// Laluan untuk mendapatkan semua fail media pengguna & muat naik
+router.route('/')
+    .get(getMediaList)
+    .post(uploadMiddleware, uploadMedia);
 
-// DELETE /media/:id - Padam fail media
-router.delete('/:id', protect, deleteMedia);
+// Laluan untuk memadam fail media spesifik
+router.route('/:id')
+    .delete(deleteMedia);
 
-export default router; 
+module.exports = router; 

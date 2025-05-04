@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const messageSchema = mongoose.Schema(
   {
@@ -45,6 +45,4 @@ const messageSchema = mongoose.Schema(
 // Indeks kompaun untuk query sejarah chat
 messageSchema.index({ user: 1, chatJid: 1, timestamp: 1 });
 
-const Message = mongoose.model('Message', messageSchema);
-
-export default Message; 
+module.exports = mongoose.model('Message', messageSchema); 

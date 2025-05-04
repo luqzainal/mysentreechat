@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 
 // Import Ikon
 import {
@@ -25,7 +26,10 @@ import {
   UserCog, 
   BadgeInfo, 
   ArrowRight,
-  Wifi, WifiOff, QrCode as QrCodeIcon, Loader2, Link as LinkIcon, XCircle
+  Wifi, WifiOff, QrCode as QrCodeIcon, Loader2, Link as LinkIcon, XCircle,
+  MessageSquareText,
+  BarChart3,
+  SendHorizonal
 } from 'lucide-react';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -38,6 +42,18 @@ function DashboardPage() {
   const [rawQrString, setRawQrString] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [socketConnected, setSocketConnected] = useState(false);
+
+  // State BARU untuk data analitik
+  const [analytics, setAnalytics] = useState({
+      totalSent: 0,
+      monthlyUsagePercent: 0,
+      monthlyUsed: 0,
+      monthlyLimit: 0,
+      bulkTotal: 0,
+      bulkSent: 0,
+      bulkFailed: 0,
+  });
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(true);
 
   // Salin semula fungsi connectSocket dari WhatsappConnectPage
   const connectSocket = useCallback(() => {
@@ -176,57 +192,43 @@ function DashboardPage() {
     );
   };
 
-  // Definisi kad-kad menu/modul
-  const modules = [
-    {
-      title: "Contacts",
-      description: "Manage your WhatsApp contact list.",
-      link: "/contacts",
-      icon: Users,
-      bgColor: "bg-blue-100",
-      iconColor: "text-blue-600"
-    },
-    {
-      title: "Bulk Sender",
-      description: "Send bulk messages to contacts.",
-      link: "/bulk-sender",
-      icon: Send,
-      bgColor: "bg-green-100",
-      iconColor: "text-green-600"
-    },
-    {
-      title: "Autoresponder + AI",
-      description: "Set up automated replies with AI.",
-      link: "/autoresponder",
-      icon: Bot,
-      bgColor: "bg-purple-100",
-      iconColor: "text-purple-600"
-    },
-    {
-      title: "Media Storage",
-      description: "Upload and manage media files.",
-      link: "/media-storage",
-      icon: ImageIcon,
-       bgColor: "bg-orange-100",
-      iconColor: "text-orange-600"
-    },
-     {
-      title: "Membership",
-      description: "View current subscription plan.",
-      link: "/membership",
-      icon: BadgeInfo,
-       bgColor: "bg-yellow-100",
-      iconColor: "text-yellow-600"
-    },
-    {
-      title: "Account Manager",
-      description: "Update profile and account settings.",
-      link: "/account",
-      icon: UserCog,
-       bgColor: "bg-gray-100",
-      iconColor: "text-gray-600"
-    },
-  ];
+  // Fetch data analitik
+  useEffect(() => {
+      const fetchAnalytics = async () => {
+          setIsAnalyticsLoading(true);
+          // TODO: Ganti dengan API call sebenar
+          /*
+          try {
+              const response = await api.get('/analytics/chat');
+              setAnalytics(response.data);
+          } catch (error) {
+              console.error("Failed to fetch chat analytics:", error);
+              toast.error("Could not load chat analytics.");
+              // Kekalkan state default atau set kepada null/error state
+          } finally {
+              setIsAnalyticsLoading(false);
+          }
+          */
+          // Simulasi
+          setTimeout(() => {
+               setAnalytics({
+                  totalSent: 10293,
+                  monthlyUsagePercent: 75,
+                  monthlyUsed: 7500,
+                  monthlyLimit: 10000,
+                  bulkTotal: 1250,
+                  bulkSent: 1200,
+                  bulkFailed: 50,
+              });
+              setIsAnalyticsLoading(false);
+          }, 800);
+      };
+
+      if (user) {
+          fetchAnalytics();
+      }
+
+  }, [user]);
 
   return (
     <div className="space-y-6">
@@ -277,31 +279,56 @@ function DashboardPage() {
           </Card>
        </div>
 
-      <p className="text-muted-foreground">
-        Manage all your WhatsApp needs from here.
-      </p>
-
-      {/* Grid Kad Modul */}
-       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {modules.map((module) => (
-            <Card key={module.link} className="hover:shadow-md transition-shadow duration-200 flex flex-col">
-              <CardHeader className="flex flex-row items-center space-x-4 pb-2">
-                <div className={`p-3 rounded-full ${module.bgColor}`}> 
-                   <module.icon className={`h-6 w-6 ${module.iconColor}`} />
-                </div>
-                <CardTitle className="text-lg">{module.title}</CardTitle>
+      {/* Bahagian Analitik Chat BARU - Guna state */}
+      <h2 className="text-2xl font-semibold">Chat Analytics</h2>
+      {isAnalyticsLoading ? (
+           <p>Loading analytics...</p>
+       ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Kad Total Messages Sent */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Messages Sent</CardTitle>
+                <MessageSquareText className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent className="flex-grow">
-                <CardDescription>{module.description}</CardDescription>
+              <CardContent>
+                <div className="text-2xl font-bold">{analytics.totalSent.toLocaleString()}</div>
+                {/* <p className="text-xs text-muted-foreground">+15% from last month</p> */}{/* Data ini mungkin perlu API berbeza */}
               </CardContent>
-               <div className="p-4 pt-0 text-right">
-                 <Link to={module.link} className="text-sm font-medium text-primary hover:underline inline-flex items-center">
-                   Go to Module <ArrowRight className="ml-1 h-4 w-4" />
-                 </Link>
-               </div>
             </Card>
-          ))}
-       </div>
+
+            {/* Kad Messages by Month */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Monthly Usage</CardTitle>
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{analytics.monthlyUsagePercent}%</div>
+                <p className="text-xs text-muted-foreground mb-2">
+                    {analytics.monthlyUsed.toLocaleString()} / {analytics.monthlyLimit.toLocaleString()} messages used
+                 </p>
+                <Progress value={analytics.monthlyUsagePercent} aria-label={`${analytics.monthlyUsagePercent}% message usage`} />
+              </CardContent>
+            </Card>
+
+            {/* Kad Bulk Messaging Stats */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Bulk Messaging</CardTitle>
+                <SendHorizonal className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{analytics.bulkTotal.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Total Campaigns Sent</p>
+                 <div className="mt-2 text-sm space-y-1">
+                     <div>Sent: <span className="font-medium">{analytics.bulkSent.toLocaleString()}</span></div>
+                     <div>Failed: <span className="font-medium text-destructive">{analytics.bulkFailed.toLocaleString()}</span></div>
+                 </div>
+              </CardContent>
+            </Card>
+          </div>
+      )}
     </div>
   );
 }

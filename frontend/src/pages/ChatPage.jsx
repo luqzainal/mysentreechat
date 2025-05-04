@@ -1,243 +1,263 @@
-import React, { useState, useEffect } from 'react';
-import api from '../services/api';
-import { useAuth } from '../contexts/AuthContext';
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import React, { useState, useEffect, useRef } from 'react';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Send } from 'lucide-react';
+import { SendHorizontal } from 'lucide-react';
+import api from '../services/api'; // Instance Axios
+import io from 'socket.io-client';
+import { useAuth } from '../contexts/AuthContext'; // Anda mungkin perlukan ini untuk userId
 
-const ChatPage = () => {
-  const [contacts, setContacts] = useState([]);
-  const [selectedContact, setSelectedContact] = useState(null);
+function ChatPage() {
+  const [chats, setChats] = useState([]);
+  const [selectedChatJid, setSelectedChatJid] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [isLoadingContacts, setIsLoadingContacts] = useState(true);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const { user } = useAuth();
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [error, setError] = useState(null);
+  const { user } = useAuth(); // Dapatkan data pengguna, termasuk ID
+  const socket = useRef(null);
+  const messagesEndRef = useRef(null); // Rujukan untuk auto-scroll
 
-  // TODO: Fetch contacts
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   useEffect(() => {
-    const fetchContacts = async () => {
-      setIsLoadingContacts(true);
+    // Fetch chat list
+    const fetchChats = async () => {
+      setLoadingChats(true);
+      setError(null);
       try {
-        // Assuming an endpoint /contacts exists
-        const response = await api.get('/contacts'); 
-        setContacts(response.data);
-      } catch (error) {
-        console.error("Failed to fetch contacts:", error);
-        toast.error("Failed to load contacts.");
-      } finally {
-        setIsLoadingContacts(false);
+        const response = await api.get('/whatsapp/chats');
+        setChats(response.data);
+      } catch (err) {
+        console.error("Error fetching chats:", err);
+        setError("Gagal memuatkan senarai perbualan.");
       }
+      setLoadingChats(false);
+    };
+    fetchChats();
+
+    // Setup Socket.IO
+    if (user && user._id) {
+        // Dapatkan URL backend dari environment variable Vite
+        const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'; 
+        console.log(`Connecting socket to: ${SOCKET_URL}`); // Tambah log untuk debug
+        socket.current = io(SOCKET_URL, {
+            query: { userId: user._id } // Hantar userId semasa sambungan
+        });
+
+        socket.current.on('connect', () => {
+            console.log('Socket connected for chat:', socket.current.id);
+        });
+
+        socket.current.on('new_whatsapp_message', (messageData) => {
+            console.log('New message received via socket:', messageData);
+            // Jika mesej adalah untuk chat yang sedang dipilih
+            if (messageData.sender === selectedChatJid || (messageData.fromMe && messageData.receiver === selectedChatJid)) {
+                setMessages((prevMessages) => [...prevMessages, messageData]);
+            }
+            // TODO: Kemaskini senarai chat (last message, timestamp, bawa ke atas)
+            // Ini mungkin memerlukan fetch semula atau kemaskini state chats
+            fetchChats(); // Cara mudah tapi mungkin tidak efisien
+        });
+
+        socket.current.on('disconnect', (reason) => {
+            console.log('Socket disconnected:', reason);
+        });
+
+        socket.current.on('connect_error', (err) => {
+            console.error('Socket connection error:', err);
+        });
+
+        // Cleanup on component unmount
+        return () => {
+            if (socket.current) {
+                console.log('Disconnecting chat socket...');
+                socket.current.disconnect();
+            }
+        };
+    }
+
+  }, [user, selectedChatJid]); // Tambah selectedChatJid sebagai dependency
+
+  useEffect(() => {
+    // Fetch messages when a chat is selected
+    const fetchMessages = async () => {
+      if (!selectedChatJid) return;
+      setLoadingMessages(true);
+      setError(null);
+      setMessages([]); // Kosongkan mesej lama
+      try {
+        // Ambil nombor telefon sahaja dari JID
+        const phoneNumber = selectedChatJid.split('@')[0];
+        const response = await api.get(`/whatsapp/chat/${phoneNumber}`);
+        setMessages(response.data);
+      } catch (err) {
+        console.error("Error fetching messages:", err);
+        setError("Gagal memuatkan mesej.");
+      }
+      setLoadingMessages(false);
     };
 
-    if (user) {
-      fetchContacts();
-    }
-  }, [user]);
+    fetchMessages();
+  }, [selectedChatJid]);
 
-  // Function to fetch messages for selected contact
-  const loadMessages = async (contactId) => {
-    if (!contactId) return;
-    const contact = contacts.find(c => c._id === contactId);
-    if (!contact) {
-        toast.error("Contact not found.");
-        return;
-    }
-    setSelectedContact(contact);
-    setIsLoadingMessages(true);
-    setMessages([]); // Clear previous messages
-    console.log(`Loading messages for contact ID: ${contactId}`);
-    
-    try {
-      // Assume endpoint /whatsapp/chat/:contactId exists and returns an array of messages
-      // Adjust the message structure { id, body, timestamp, fromMe } based on your actual backend response
-      const response = await api.get(`/whatsapp/chat/${contactId}`); 
-      setMessages(response.data || []); // Ensure it's an array
-    } catch (error) {
-      console.error("Failed to load messages:", error);
-      toast.error(error.response?.data?.message || "Failed to load chat history.");
-      setMessages([]); // Clear messages on error
-    } finally {
-      setIsLoadingMessages(false);
-    }
+  // Auto-scroll ke bawah apabila mesej baru ditambah
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSelectChat = (jid) => {
+    setSelectedChatJid(jid);
   };
 
-  // Function to send message
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedContact || isSending) return;
+  const handleSendMessage = async (e) => {
+    e.preventDefault(); // Elak form submission refresh page
+    if (!newMessage.trim() || !selectedChatJid) return;
 
-    setIsSending(true);
     const messageToSend = newMessage;
-    const recipientNumber = selectedContact.phoneNumber; // Get phone number
-    
-    // Optimistic UI update
-    const optimisticMessage = {
-        id: `temp-${Date.now()}`,
-        sender: user._id, // Assuming user object has _id
-        body: messageToSend,
-        timestamp: Date.now(),
-        fromMe: true,
-        status: 'sending' // Optional status indicator
-    };
-    setMessages(prev => [...prev, optimisticMessage]);
-    setNewMessage(''); // Clear input immediately
+    setNewMessage(''); // Kosongkan input
 
-    console.log(`Attempting to send message to ${recipientNumber}: ${messageToSend}`);
-    
+    // Optimistic UI update (optional)
+    // const optimisticMessage = {
+    //     id: Date.now(), // Temporary ID
+    //     body: messageToSend,
+    //     timestamp: new Date().toISOString(),
+    //     fromMe: true
+    // };
+    // setMessages(prevMessages => [...prevMessages, optimisticMessage]);
+
     try {
-      // Assume endpoint /whatsapp/send exists
-      // Backend should handle mapping phoneNumber to the correct WhatsApp ID/session
-      const response = await api.post('/whatsapp/send', { 
-        to: recipientNumber, // Send phone number
-        message: messageToSend 
+      await api.post('/whatsapp/send', {
+        to: selectedChatJid.split('@')[0], // Hantar nombor sahaja
+        message: messageToSend,
       });
-
-      // Update message status after successful send (if backend confirms)
-      setMessages(prev => prev.map(msg => 
-          msg.id === optimisticMessage.id ? { ...msg, status: 'sent', id: response.data?.messageId || optimisticMessage.id } : msg // Replace temp id if possible
-      ));
-
-    } catch (error) {
-      console.error("Failed to send message:", error);
-      toast.error(error.response?.data?.message || "Failed to send message.");
-      // Revert optimistic update or mark as failed
-      setMessages(prev => prev.map(msg => 
-          msg.id === optimisticMessage.id ? { ...msg, status: 'failed' } : msg
-      ));
-      // setNewMessage(messageToSend); // Optionally restore input 
-    } finally {
-      setIsSending(false);
+      // Mesej yang berjaya dihantar akan diterima balik melalui socket
+      // jika whatsappService menyimpannya dan emit
+    } catch (err) {
+      console.error("Error sending message:", err);
+      setError("Gagal menghantar mesej.");
+      // Rollback optimistic update if needed
+      // setMessages(prevMessages => prevMessages.filter(msg => msg.id !== optimisticMessage.id));
+      setNewMessage(messageToSend); // Kembalikan teks ke input jika gagal
     }
   };
-  
-   // TODO: Setup Socket.IO listener for incoming messages
-    useEffect(() => {
-        // --- Backend interaction required ---
-        // Example:
-        // const socket = io(SOCKET_SERVER_URL); // Use existing socket logic if possible
-        // socket.on('new_whatsapp_message', (messageData) => {
-        //      console.log('Received message:', messageData);
-        //      // Check if the message belongs to the currently selected chat
-        //      if (selectedContact && messageData.senderId === selectedContact._id) { // Adjust based on actual data structure
-        //          setMessages(prev => [...prev, { ...messageData, fromMe: false }]); 
-        //          // Add logic to scroll down
-        //      } else {
-        //         // Optionally show a notification for messages from other chats
-        //         toast.info(`New message from ${messageData.senderName || messageData.senderNumber}`);
-        //      }
-        // });
-        // return () => {
-        //     socket.off('new_whatsapp_message');
-        //     // socket.disconnect(); // Only if socket is specific to this page
-        // }
-        // --- End Example ---
-    }, [selectedContact]); // Re-run if selected contact changes
-
 
   return (
-    <div className="flex h-[calc(100vh-theme(space.24))]"> {/* Adjust height based on your layout's header/nav */}
-      {/* Contact List Sidebar */}
-      <Card className="w-1/3 lg:w-1/4 border-r rounded-none">
-        <CardHeader>
-          <CardTitle>Contacts</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="h-[calc(100vh-theme(space.48))]"> {/* Adjust height */}
-            {isLoadingContacts ? (
-              <p className="p-4 text-center text-muted-foreground">Loading contacts...</p>
-            ) : contacts.length === 0 ? (
-               <p className="p-4 text-center text-muted-foreground">No contacts found.</p>
-            ) : (
-              contacts.map((contact) => (
-                <button
-                  key={contact._id}
-                  className={`flex items-center w-full p-3 text-left hover:bg-muted/50 ${selectedContact?._id === contact._id ? 'bg-muted' : ''}`}
-                  onClick={() => loadMessages(contact._id)}
-                >
-                  <Avatar className="h-9 w-9 mr-3">
-                     {/* Assuming contacts might have an image URL */}
-                    <AvatarImage src={contact.imageUrl || `https://avatar.vercel.sh/${contact.phoneNumber}.png`} alt={contact.name} /> 
-                    <AvatarFallback>{contact.name?.substring(0, 1) || '?'}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 truncate">
-                    <p className="font-medium">{contact.name}</p>
-                    <p className="text-xs text-muted-foreground">{contact.phoneNumber}</p>
-                  </div>
-                </button>
-              ))
-            )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-
-      {/* Chat Area */}
-      <div className="flex flex-col flex-1 bg-muted/20">
-        {!selectedContact ? (
-          <div className="flex flex-1 items-center justify-center text-muted-foreground">
-            Select a contact to start chatting.
-          </div>
-        ) : (
-          <>
-            {/* Chat Header */}
-            <div className="flex items-center p-4 border-b bg-background">
-               <Avatar className="h-9 w-9 mr-3">
-                   <AvatarImage src={selectedContact.imageUrl || `https://avatar.vercel.sh/${selectedContact.phoneNumber}.png`} alt={selectedContact.name} /> 
-                   <AvatarFallback>{selectedContact.name?.substring(0, 1) || '?'}</AvatarFallback>
-               </Avatar>
-               <h2 className="font-semibold">{selectedContact.name}</h2>
-               {/* Optional: Add status or other info here */}
+    <div className="flex flex-col h-screen p-4 space-y-4">
+      <h1 className="text-2xl font-bold">Chat</h1>
+      {error && <p className="text-red-500">{error}</p>}
+      <ResizablePanelGroup direction="horizontal" className="flex-1 border rounded-lg">
+        <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+          <div className="flex flex-col h-full">
+            <div className="p-4 font-semibold border-b">
+              Senarai Perbualan
             </div>
-
-            {/* Messages Area */}
-            <ScrollArea className="flex-1 p-4 space-y-4">
-               {isLoadingMessages ? (
-                  <p className="text-center text-muted-foreground">Loading messages...</p>
-               ) : messages.length === 0 ? (
-                   <p className="text-center text-muted-foreground">No messages yet.</p>
-               ): (
-                  messages.map((msg) => (
-                    <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-xs lg:max-w-md p-3 rounded-lg ${msg.fromMe ? 'bg-primary text-primary-foreground' : 'bg-background border'}`}>
-                        <p>{msg.body}</p>
-                        <p className={`text-xs mt-1 ${msg.fromMe ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
+            <ScrollArea className="flex-1">
+              {loadingChats ? (
+                <p className="p-4 text-center text-gray-500">Memuatkan...</p>
+              ) : chats.length === 0 ? (
+                 <p className="p-4 text-center text-gray-500">Tiada perbualan ditemui.</p>
+              ) : (
+                chats.map((chat) => (
+                  <div
+                    key={chat.jid}
+                    className={`p-4 border-b cursor-pointer hover:bg-gray-100 ${
+                      selectedChatJid === chat.jid ? 'bg-gray-200' : ''
+                    }`}
+                    onClick={() => handleSelectChat(chat.jid)}
+                  >
+                    <div className="flex items-center space-x-3">
+                       <Avatar className="h-10 w-10">
+                           {/* TODO: Add Avatar Image if available */}
+                           <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                       </Avatar>
+                       <div className="flex-1 min-w-0">
+                          <p className="font-semibold truncate">{chat.name}</p>
+                          <p className="text-sm text-gray-500 truncate">
+                            {chat.lastMessageFromMe ? 'Anda: ' : ''}
+                            {chat.lastMessageBody}
+                          </p>
+                       </div>
+                       <p className="text-xs text-gray-400">
+                           {new Date(chat.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                       </p>
                     </div>
-                  ))
-               )}
-               {/* TODO: Add scroll-to-bottom functionality */}
+                  </div>
+                ))
+              )}
             </ScrollArea>
-
-            {/* Message Input Area */}
-            <div className="p-4 border-t bg-background">
-              <form 
-                onSubmit={(e) => { e.preventDefault(); sendMessage(); }} 
-                className="flex items-center space-x-2"
-              >
-                <Input
-                  type="text"
-                  placeholder="Type a message..."
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  disabled={isSending || isLoadingMessages}
-                  className="flex-1"
-                />
-                <Button type="submit" size="icon" disabled={isSending || !newMessage.trim()}>
-                  {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </Button>
-              </form>
-            </div>
-          </>
-        )}
-      </div>
+          </div>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={75}>
+          <div className="flex flex-col h-full">
+            {selectedChatJid ? (
+              <>
+                <div className="p-4 border-b flex items-center space-x-3">
+                   <Avatar className="h-10 w-10">
+                       <AvatarFallback>{(chats.find(c=>c.jid===selectedChatJid)?.name || '?').substring(0, 2).toUpperCase()}</AvatarFallback>
+                   </Avatar>
+                  <h2 className="font-semibold text-lg">{chats.find(c=>c.jid===selectedChatJid)?.name || selectedChatJid}</h2>
+                </div>
+                <ScrollArea className="flex-1 bg-gray-50 p-4">
+                  {loadingMessages ? (
+                    <p className="text-center text-gray-500">Memuatkan mesej...</p>
+                  ) : messages.length === 0 ? (
+                    <p className="text-center text-gray-500">Tiada mesej dalam perbualan ini.</p>
+                  ) : (
+                    messages.map((msg, index) => (
+                      <div
+                        key={msg.id || index} // Guna index sebagai fallback key
+                        className={`flex mb-3 ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`rounded-lg px-4 py-2 max-w-[70%] ${
+                            msg.fromMe
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-white text-black border'
+                          }`}
+                        >
+                          <p>{msg.body}</p>
+                          <p className="text-xs opacity-70 mt-1 text-right">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <div ref={messagesEndRef} /> { /* Elemen kosong untuk auto-scroll */}
+                </ScrollArea>
+                <form onSubmit={handleSendMessage} className="p-4 border-t bg-white">
+                  <div className="flex items-center space-x-2">
+                    <Input
+                      type="text"
+                      placeholder="Taip mesej..."
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      className="flex-1"
+                      disabled={loadingMessages}
+                    />
+                    <Button type="submit" size="icon" disabled={!newMessage.trim() || loadingMessages}>
+                      <SendHorizontal className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                Pilih perbualan untuk mula berbual.
+              </div>
+            )}
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
-};
+}
 
 export default ChatPage; 

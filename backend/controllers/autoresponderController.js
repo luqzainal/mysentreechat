@@ -1,4 +1,4 @@
-import AutoresponderSetting from '../models/AutoresponderSetting.js';
+const AutoresponderSetting = require('../models/AutoresponderSetting.js');
 
 // @desc    Dapatkan tetapan autoresponder pengguna
 // @route   GET /autoresponder/settings
@@ -119,4 +119,10 @@ const removeSavedResponse = async (req, res) => {
     }
 };
 
-export { getAutoresponderSettings, updateAutoresponderSettings, addSavedResponse, removeSavedResponse }; 
+module.exports = {
+  // Export semua fungsi controller
+  getAutoresponderSettings,
+  updateAutoresponderSettings,
+  addSavedResponse,
+  removeSavedResponse
+}; 

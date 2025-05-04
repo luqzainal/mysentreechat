@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const contactSchema = new mongoose.Schema({
   name: {
@@ -22,6 +22,4 @@ const contactSchema = new mongoose.Schema({
 // Pastikan nombor telefon unik untuk setiap pengguna
 contactSchema.index({ phoneNumber: 1, user: 1 }, { unique: true });
 
-const Contact = mongoose.model('Contact', contactSchema);
-
-export default Contact; 
+module.exports = mongoose.model('Contact', contactSchema); 

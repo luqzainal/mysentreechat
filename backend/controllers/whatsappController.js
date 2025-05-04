@@ -1,8 +1,7 @@
-import Contact from '../models/Contact.js';
-import Message from '../models/Message.js'; // <-- Import model Message
-// import { sock } from '../services/whatsappService.js'; // Buang import sock
-import { getWhatsAppSocket, sendMessage as sendWhatsappMessage } from '../services/whatsappService.js';
-import { processSpintax } from '../utils/spintaxUtils.js'; // Import fungsi spintax
+const Contact = require('../models/Contact.js');
+const Message = require('../models/Message.js');
+const { getWhatsAppSocket, sendMessage: sendWhatsappMessage } = require('../services/whatsappService.js');
+const { processSpintax } = require('../utils/spintaxUtils.js');
 
 // Fungsi helper untuk format nombor ke JID WhatsApp
 const formatToJid = (number) => {
@@ -173,4 +172,63 @@ const sendMessage = async (req, res) => {
   }
 };
 
-export { sendBulkMessage, getChatHistory, sendMessage }; // <-- Pastikan semua dieksport 
+// @desc    Dapatkan senarai perbualan (chats)
+// @route   GET /api/whatsapp/chats
+// @access  Private
+const getChats = async (req, res) => {
+    const userId = req.user._id;
+    try {
+        // 1. Agregasi mesej untuk dapatkan mesej terakhir bagi setiap chatJid
+        const latestMessages = await Message.aggregate([
+            { $match: { user: userId } }, // Hanya mesej pengguna ini
+            { $sort: { timestamp: -1 } }, // Susun ikut timestamp terbaru dahulu
+            {
+                $group: {
+                    _id: "$chatJid", // Kumpulkan berdasarkan chatJid
+                    lastMessageTimestamp: { $first: "$timestamp" },
+                    lastMessageBody: { $first: "$body" },
+                    lastMessageFromMe: { $first: "$fromMe" },
+                    // Boleh tambah field lain jika perlu, cth: unreadCount
+                }
+            },
+            { $sort: { lastMessageTimestamp: -1 } } // Susun chat ikut mesej terbaru
+        ]);
+
+        // 2. Dapatkan nama kenalan (jika ada) untuk setiap chatJid
+        const chatJids = latestMessages.map(msg => msg._id);
+        const contacts = await Contact.find({ user: userId, phoneNumber: { $in: chatJids } }).select('phoneNumber name');
+        const contactMap = contacts.reduce((map, contact) => {
+            map[contact.phoneNumber] = contact.name;
+            return map;
+        }, {});
+
+        // 3. Gabungkan data agregat dengan nama kenalan
+        const chats = latestMessages.map(chat => ({
+            jid: chat._id,
+            name: contactMap[chat._id] || chat._id.split('@')[0], // Guna nama jika ada, jika tidak guna nombor
+            lastMessageTimestamp: chat.lastMessageTimestamp,
+            lastMessageBody: chat.lastMessageBody,
+            lastMessageFromMe: chat.lastMessageFromMe
+            // Tambah field lain seperti unread count jika logik ditambah
+        }));
+
+        res.json(chats);
+
+    } catch (error) {
+        console.error(`Error fetching chats for user ${userId}:`, error);
+        res.status(500).json({ message: 'Server error fetching chats.' });
+    }
+};
+
+module.exports = {
+  // Export semua fungsi controller di sini
+  // getContacts, // Dipindahkan ke contactController.js
+  sendMessage,
+  // getMessages, // Nampaknya tidak digunakan/didefinisikan
+  // getChats, // Nampaknya tidak digunakan/didefinisikan
+  // getScanQRCode, // Nampaknya tidak digunakan/didefinisikan
+  // disconnectWhatsapp, // Nampaknya tidak digunakan/didefinisikan
+  sendBulkMessage,
+  getChatHistory,
+  getChats // Tambah fungsi baru
+}; 

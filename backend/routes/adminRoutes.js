@@ -1,20 +1,25 @@
-import express from 'express';
+const express = require('express');
 const router = express.Router();
-import { getAllUsers, updateUserPlan, changeUserRole } from '../controllers/adminController.js';
-import { protect } from '../middleware/authMiddleware.js'; // Middleware pengesahan token
-import { isAdmin } from '../middleware/adminMiddleware.js'; // Middleware pengesahan admin
+const {
+  getAllUsers,
+  getUserById,
+  updateUserById,
+  deleteUserById
+} = require('../controllers/adminController.js');
+const { protect, admin } = require('../middleware/authMiddleware.js');
 
-// Laluan untuk mendapatkan semua pengguna
-// Dilindungi oleh protect (mesti log masuk) dan isAdmin (mesti admin)
-router.get('/users', protect, isAdmin, getAllUsers);
+// Semua laluan admin dilindungi oleh 'protect' dan 'admin' middleware
+router.use(protect, admin);
 
-// Laluan baru untuk mengemaskini pelan pengguna
-// :id merujuk kepada user ID yang akan dikemaskini
-router.put('/users/:id/plan', protect, isAdmin, updateUserPlan);
+// GET /api/admin/users - Dapatkan semua pengguna
+router.get('/users', getAllUsers);
 
-// PUT baru untuk kemaskini role pengguna
-router.put('/users/:id/role', protect, isAdmin, changeUserRole);
+// Operasi pada pengguna spesifik by ID
+router.route('/users/:id')
+  .get(getUserById) // GET /api/admin/users/:id
+  .put(updateUserById) // PUT /api/admin/users/:id
+  .delete(deleteUserById); // DELETE /api/admin/users/:id
 
 // Tambah laluan admin lain di sini nanti...
 
-export default router; 
+module.exports = router; 

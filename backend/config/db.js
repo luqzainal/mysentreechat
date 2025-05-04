@@ -1,13 +1,25 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+
+// Load env vars if running separately (optional)
+dotenv.config(); 
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(`MongoDB Tersambung: ${conn.connection.host}`);
+    const conn = await mongoose.connect(process.env.MONGO_URI, {
+      // Opsyen Mongoose 6 tidak memerlukan banyak flag lama
+      // useNewUrlParser: true, 
+      // useUnifiedTopology: true,
+      // useCreateIndex: true, // Tidak disokong
+      // useFindAndModify: false // Tidak disokong
+    });
+
+    console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
-    console.error(`Ralat Sambungan MongoDB: ${error.message}`);
-    process.exit(1); // Keluar dari proses jika sambungan gagal
+    console.error(`Error connecting to MongoDB: ${error.message}`);
+    // Exit process with failure
+    process.exit(1);
   }
 };
 
-export default connectDB; 
+module.exports = connectDB; 

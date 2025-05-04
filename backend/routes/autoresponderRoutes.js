@@ -1,17 +1,24 @@
-import express from 'express';
+const express = require('express');
 const router = express.Router();
-import { getAutoresponderSettings, updateAutoresponderSettings, addSavedResponse, removeSavedResponse } from '../controllers/autoresponderController.js';
-import { protect } from '../middleware/authMiddleware.js';
+const {
+  getAutoresponderSettings,
+  updateAutoresponderSettings,
+  addSavedResponse,
+  removeSavedResponse
+} = require('../controllers/autoresponderController.js');
+const { protect } = require('../middleware/authMiddleware.js');
 
-// Laluan untuk mendapatkan dan mengemaskini tetapan
+// Lindungi semua laluan ini
+router.use(protect);
+
+// Laluan untuk tetapan utama
 router.route('/settings')
-  .get(protect, getAutoresponderSettings)
-  .put(protect, updateAutoresponderSettings);
+  .get(getAutoresponderSettings)
+  .put(updateAutoresponderSettings);
 
-// POST /api/autoresponder/responses - Tambah satu saved response
-router.post('/responses', addSavedResponse);
+// Laluan untuk respons tersimpan
+router.route('/responses')
+    .post(addSavedResponse) // Tambah respons baru
+    .delete(removeSavedResponse); // Gunakan nama yang betul
 
-// DELETE /api/autoresponder/responses - Padam satu saved response (guna query string)
-router.delete('/responses', removeSavedResponse);
-
-export default router; 
+module.exports = router; 

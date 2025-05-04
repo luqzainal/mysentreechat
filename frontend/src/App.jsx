@@ -11,22 +11,30 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ContactPage from './pages/ContactPage';
 import BulkSender from './pages/BulkSender';
-import AutoresponderPage from './pages/AutoresponderPage';
+import AutoresponderPage from './pages/AIChatbotPage';
 import MembershipPage from './pages/MembershipPage';
 import AccountPage from './pages/AccountPage';
 import MediaStoragePage from './pages/MediaStoragePage';
 import UserListPage from './pages/admin/UserListPage'; // Import halaman admin
 import ChatPage from './pages/ChatPage'; // <-- Import ChatPage baru
+import ScanDevicePage from './pages/ScanDevicePage'; // <-- Tambah import untuk ScanDevicePage
+// Import halaman baru untuk Campaign
+import CampaignListPage from './pages/CampaignListPage'; // <-- BARU
+import AddCampaignPage from './pages/AddCampaignPage'; // <-- BARU
+// Import halaman Settings
+import SettingsPage from './pages/SettingsPage'; // <-- BARU
 
 // Import Icons
 import {
   LayoutDashboard, // Dashboard
-  MessageSquare, // Messages (contoh)
-  Users, // Contacts
+  MessageSquare, // Chat
+  Users, // Contacts (Upload Contacts)
   Send, // Bulk Sender
-  Bot, // Autoresponder
-  Image as ImageIcon, // Media Storage (rename to avoid conflict)
-  UserCog, // Account
+  Bot, // AI Chatbot (asalnya Autoresponder)
+  QrCode, // Scan Device (BARU)
+  ScanLine, // Alternatif Scan Device
+  ImageIcon, // Media Storage (untuk dropdown)
+  UserCog, // Account (untuk dropdown)
   BadgeInfo, // Membership (alternative)
   Settings, // Settings (jika perlu)
   LogOut, // Logout
@@ -34,7 +42,7 @@ import {
   Mail, // Mail (contoh)
   BotMessageSquare, // App Logo
   ChevronDown, // Dropdown arrow
-  Menu, // Icon untuk menu mobile (jika perlu)
+  Menu, // Icon untuk menu mobile
   ShieldCheck // Ikon untuk Admin
 } from 'lucide-react';
 
@@ -62,18 +70,21 @@ const Header = () => {
   const navigate = useNavigate();
 
   // Pindahkan menuItems ke sini
+  // Susunan Navbar Baru: Dashboard, Scan Device, Upload Contacts, AI Chatbot, Chat, Bulk Sender
   const menuItems = [
     { to: "/", icon: LayoutDashboard, title: "Dashboard" },
-    { to: "/chat", icon: MessageSquare, title: "Chat" }, // <-- Tambah item menu Chat
-    { to: "/contacts", icon: Users, title: "Contacts" },
+    { to: "/scan-device", icon: QrCode, title: "Scan Device" }, // <-- BARU
+    { to: "/contacts", icon: Users, title: "Upload Contacts" }, // Tukar title
+    { to: "/ai-chatbot", icon: Bot, title: "AI Chatbot" }, // Tukar path dan title
+    { to: "/chat", icon: MessageSquare, title: "Chat" },
     { to: "/bulk-sender", icon: Send, title: "Bulk Sender" },
-    { to: "/autoresponder", icon: Bot, title: "Autoresponder" },
-    { to: "/media-storage", icon: ImageIcon, title: "Media Storage" },
-    { to: "/membership", icon: BadgeInfo, title: "Membership" },
-    { to: "/account", icon: UserCog, title: "Account" },
+    // { to: "/media-storage", icon: ImageIcon, title: "Media Storage" }, // Buang
+    // { to: "/membership", icon: BadgeInfo, title: "Membership" }, // Buang
+    // { to: "/account", icon: UserCog, title: "Account" }, // Buang dari navbar utama
   ];
 
   // Tambah pautan admin jika role === 'admin'
+  // Pautan admin tidak dinyatakan dalam perubahan, jadi kita kekalkan buat masa ini
   const adminMenuItems = user?.role === 'admin' ? [
      { to: "/admin/users", icon: ShieldCheck, title: "Admin Users" }
   ] : [];
@@ -92,7 +103,7 @@ const Header = () => {
         {/* Logo */} 
         <Link to="/" className="flex items-center space-x-2 text-primary font-semibold">
           <BotMessageSquare size={28} />
-          <span className="hidden sm:inline">mySentree AI Chatbot</span>
+          <span className="hidden sm:inline">AI Chatbot</span>
         </Link>
 
         {/* Navigasi Utama - Tersembunyi pada mobile, tunjuk pada skrin besar */} 
@@ -144,10 +155,14 @@ const Header = () => {
               <DropdownMenuItem asChild>
                  <Link to="/account"> <UserCog className="mr-2 h-4 w-4" /> Account Profile</Link>
               </DropdownMenuItem>
-               <DropdownMenuItem asChild>
-                 <Link to="/membership"><BadgeInfo className="mr-2 h-4 w-4" /> Membership</Link>
+              <DropdownMenuItem asChild>
+                 <Link to="/media-storage"> <ImageIcon className="mr-2 h-4 w-4" /> Media Storage</Link>
               </DropdownMenuItem>
-              
+              {/* Tambah Pautan Settings */}
+               <DropdownMenuItem asChild>
+                 <Link to="/settings"> <Settings className="mr-2 h-4 w-4" /> Settings</Link>
+              </DropdownMenuItem>
+
               {/* Pautan Admin (jika user admin) */} 
               {user.role === 'admin' && (
                   <>
@@ -178,7 +193,7 @@ const Header = () => {
                     {/* Logo dalam Sheet */}
                      <Link to="/" className="flex items-center space-x-2 text-primary font-semibold mb-6">
                        <BotMessageSquare size={28} />
-                       <span>Waziper</span>
+                       <span>AI Chatbot</span>
                      </Link>
                      {/* Navigasi dalam Sheet */} 
                     <nav className="flex flex-col space-y-2">
@@ -275,13 +290,17 @@ function App() {
       {/* Laluan untuk Aplikasi Utama (dilindungi oleh MainLayout) */}
       <Route element={<MainLayout />}>
         <Route index element={<DashboardPage />} />
-        <Route path="/chat" element={<ChatPage />} /> {/* <-- Tambah route untuk ChatPage */}
+        <Route path="/scan-device" element={<ScanDevicePage />} />
+        <Route path="/chat" element={<ChatPage />} />
         <Route path="/contacts" element={<ContactPage />} />
         <Route path="/bulk-sender" element={<BulkSender />} />
-        <Route path="/autoresponder" element={<AutoresponderPage />} />
+        <Route path="/ai-chatbot" element={<AutoresponderPage />} />
+        <Route path="/ai-chatbot/:numberId/campaigns" element={<CampaignListPage />} />
+        <Route path="/ai-chatbot/:numberId/campaigns/create" element={<AddCampaignPage />} />
         <Route path="/media-storage" element={<MediaStoragePage />} />
-        <Route path="/membership" element={<MembershipPage />} />
         <Route path="/account" element={<AccountPage />} />
+        {/* Laluan BARU untuk Settings */}
+        <Route path="/settings" element={<SettingsPage />} />
 
         {/* Laluan Admin (dilindungi) */}
         <Route element={<AdminRouteGuard />}> { /* Bungkus laluan admin */}
