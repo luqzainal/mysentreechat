@@ -179,48 +179,48 @@ const AutoresponderPage = () => {
       {!isLoading && connectedNumbers.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {connectedNumbers.map((num) => (
-            <Card key={num.id} className="flex flex-col overflow-hidden">
-               {/* Header Biru */}
-              <div className="bg-gradient-to-r from-blue-500 to-cyan-400 p-4 text-white relative">
-                 <div className="flex items-center space-x-3">
-                      <Avatar className="h-12 w-12 border-2 border-white">
-                         <AvatarImage src={num.avatarUrl} alt={num.name} />
-                         <AvatarFallback>{num.name?.substring(0, 1) || '?'}</AvatarFallback>
-                     </Avatar>
-                     <div>
-                         <CardTitle className="text-lg text-white">{num.name}</CardTitle>
-                         <CardDescription className="text-blue-100">{num.number}</CardDescription>
-                     </div>
+            <Card key={num.id} className="flex flex-col overflow-hidden border shadow-sm">
+               {/* Header - Guna warna latar belakang kad */}
+              <CardHeader className="flex flex-row items-center space-x-3 p-4 border-b bg-card">
+                 <Avatar className="h-12 w-12 border">
+                     <AvatarImage src={num.avatarUrl} alt={num.name} />
+                     <AvatarFallback>{num.name?.substring(0, 1) || '?'}</AvatarFallback>
+                 </Avatar>
+                 <div className="flex-1">
+                     {/* Guna warna teks utama */}
+                     <CardTitle className="text-lg text-card-foreground">{num.name}</CardTitle>
+                     {/* Guna warna teks muted */}
+                     <CardDescription className="text-muted-foreground">{num.number}</CardDescription>
                  </div>
-                 {/* Icon Bot di penjuru */}
-                 <BotIcon className="absolute top-4 right-4 h-10 w-10 text-white/30" />
-              </div>
+                 {/* Icon Bot - Guna warna muted */}
+                 <BotIcon className="h-10 w-10 text-muted-foreground/50" />
+              </CardHeader>
 
-              {/* Content Putih - Statistik */}
-              <CardContent className="grid grid-cols-2 gap-4 p-4 bg-white flex-grow">
+              {/* Content - Statistik (sudah guna bg-muted) */}
+              <CardContent className="grid grid-cols-2 gap-4 p-4 bg-card flex-grow">
                  {/* Stat Sent */}
-                 <div className="bg-slate-50 rounded-lg p-4 text-center">
+                 <div className="bg-muted rounded-lg p-4 text-center text-muted-foreground">
                       <Send className="h-6 w-6 text-green-500 mx-auto mb-2" />
-                      <p className="text-2xl font-semibold">{num.stats.sent}</p>
-                      <p className="text-sm text-muted-foreground">Sent</p>
+                      <p className="text-2xl font-semibold text-card-foreground">{num.stats.sent}</p>
+                      <p className="text-sm">Sent</p>
                  </div>
                   {/* Stat Items (Campaigns) */}
-                 <div className="bg-slate-50 rounded-lg p-4 text-center">
+                 <div className="bg-muted rounded-lg p-4 text-center text-muted-foreground">
                       <Paperclip className="h-6 w-6 text-red-500 mx-auto mb-2" />
-                      <p className="text-2xl font-semibold">{num.stats.items}</p>
-                      <p className="text-sm text-muted-foreground">Campaigns</p>
+                      <p className="text-2xl font-semibold text-card-foreground">{num.stats.items}</p>
+                      <p className="text-sm">Campaigns</p>
                  </div>
               </CardContent>
 
-               {/* Status Toggle / Setup Message */}
-              <CardContent className="p-4 bg-white">
+               {/* Status Toggle / Setup Message (sudah guna bg-card) */}
+              <CardContent className="p-4 bg-card">
                   {num.needsSetup ? (
-                      <div className="border rounded-md p-3 text-center text-sm text-muted-foreground">
+                      <div className="border border-border rounded-md p-3 text-center text-sm text-muted-foreground">
                           Please add at least a chatbot campaign and enable it to can start.
                        </div>
                   ) : (
-                      <div className="flex items-center justify-between space-x-2 rounded-lg border p-3">
-                          <Label htmlFor={`status-switch-${num.id}`} className="font-medium">Status</Label>
+                      <div className="flex items-center justify-between space-x-2 rounded-lg border border-border p-3">
+                          <Label htmlFor={`status-switch-${num.id}`} className="font-medium text-card-foreground">Status</Label>
                           <Switch
                               id={`status-switch-${num.id}`}
                               checked={num.statusEnabled}
@@ -231,8 +231,8 @@ const AutoresponderPage = () => {
                   )}
               </CardContent>
 
-              {/* Footer Putih - Butang */}
-              <CardFooter className="flex justify-between gap-3 p-4 bg-white border-t">
+              {/* Footer - Butang (sudah guna bg-card) */}
+              <CardFooter className="flex justify-between gap-3 p-4 bg-card border-t border-border">
                  {/* Tukar Add Item -> Add Campaign */}
                  <Button asChild className="flex-1" variant="default">
                      {/* Pautan perlu dinamik berdasarkan ID nombor */}

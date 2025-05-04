@@ -45,9 +45,9 @@ function ChatPage() {
     if (user && user._id) {
         // Dapatkan URL backend dari environment variable Vite
         const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'; 
-        console.log(`Connecting socket to: ${SOCKET_URL}`); // Tambah log untuk debug
+        console.log(`Connecting socket to: ${SOCKET_URL}`);
         socket.current = io(SOCKET_URL, {
-            query: { userId: user._id } // Hantar userId semasa sambungan
+            query: { userId: user._id }
         });
 
         socket.current.on('connect', () => {
@@ -56,13 +56,45 @@ function ChatPage() {
 
         socket.current.on('new_whatsapp_message', (messageData) => {
             console.log('New message received via socket:', messageData);
-            // Jika mesej adalah untuk chat yang sedang dipilih
-            if (messageData.sender === selectedChatJid || (messageData.fromMe && messageData.receiver === selectedChatJid)) {
+            const chatJid = messageData.fromMe ? messageData.receiver : messageData.sender;
+
+            // Kemaskini mesej jika chat sedang dipilih
+            if (chatJid === selectedChatJid) {
                 setMessages((prevMessages) => [...prevMessages, messageData]);
             }
-            // TODO: Kemaskini senarai chat (last message, timestamp, bawa ke atas)
-            // Ini mungkin memerlukan fetch semula atau kemaskini state chats
-            fetchChats(); // Cara mudah tapi mungkin tidak efisien
+
+            // Kemaskini senarai chats dengan mesej & timestamp terkini
+            setChats(prevChats => {
+                const chatIndex = prevChats.findIndex(c => c.jid === chatJid);
+                let updatedChat;
+                let otherChats;
+
+                if (chatIndex > -1) {
+                    // Chat sedia ada, kemaskini dan bawa ke atas
+                    updatedChat = {
+                        ...prevChats[chatIndex],
+                        lastMessageBody: messageData.body,
+                        lastMessageTimestamp: messageData.timestamp,
+                        lastMessageFromMe: messageData.fromMe
+                    };
+                    otherChats = prevChats.filter(c => c.jid !== chatJid);
+                } else {
+                    // Chat baru, perlu dapatkan nama (jika ada) atau guna nombor
+                    // Ini mungkin memerlukan panggilan API tambahan atau struktur data berbeza
+                    // Buat masa ini, kita cipta chat baru dengan info asas
+                    updatedChat = {
+                        jid: chatJid,
+                        name: chatJid.split('@')[0], // Guna nombor sebagai fallback
+                        lastMessageBody: messageData.body,
+                        lastMessageTimestamp: messageData.timestamp,
+                        lastMessageFromMe: messageData.fromMe
+                    };
+                    otherChats = prevChats;
+                     // Mungkin fetch nama kenalan di sini jika perlu
+                     // api.get(`/contacts/by-number/${chatJid.split('@')[0]}`).then(...) 
+                }
+                return [updatedChat, ...otherChats]; // Letak chat terkini di atas
+            });
         });
 
         socket.current.on('disconnect', (reason) => {
@@ -82,7 +114,7 @@ function ChatPage() {
         };
     }
 
-  }, [user, selectedChatJid]); // Tambah selectedChatJid sebagai dependency
+  }, [user, selectedChatJid]);
 
   useEffect(() => {
     // Fetch messages when a chat is selected
@@ -90,15 +122,16 @@ function ChatPage() {
       if (!selectedChatJid) return;
       setLoadingMessages(true);
       setError(null);
-      setMessages([]); // Kosongkan mesej lama
+      setMessages([]);
       try {
-        // Ambil nombor telefon sahaja dari JID
         const phoneNumber = selectedChatJid.split('@')[0];
         const response = await api.get(`/whatsapp/chat/${phoneNumber}`);
-        setMessages(response.data);
+        // Pastikan data adalah array
+        setMessages(Array.isArray(response.data) ? response.data : []); 
       } catch (err) {
         console.error("Error fetching messages:", err);
         setError("Gagal memuatkan mesej.");
+        setMessages([]); // Pastikan state adalah array kosong jika ralat
       }
       setLoadingMessages(false);
     };
@@ -116,34 +149,22 @@ function ChatPage() {
   };
 
   const handleSendMessage = async (e) => {
-    e.preventDefault(); // Elak form submission refresh page
+    e.preventDefault();
     if (!newMessage.trim() || !selectedChatJid) return;
 
     const messageToSend = newMessage;
-    setNewMessage(''); // Kosongkan input
-
-    // Optimistic UI update (optional)
-    // const optimisticMessage = {
-    //     id: Date.now(), // Temporary ID
-    //     body: messageToSend,
-    //     timestamp: new Date().toISOString(),
-    //     fromMe: true
-    // };
-    // setMessages(prevMessages => [...prevMessages, optimisticMessage]);
+    setNewMessage('');
 
     try {
       await api.post('/whatsapp/send', {
-        to: selectedChatJid.split('@')[0], // Hantar nombor sahaja
+        to: selectedChatJid.split('@')[0],
         message: messageToSend,
       });
-      // Mesej yang berjaya dihantar akan diterima balik melalui socket
-      // jika whatsappService menyimpannya dan emit
+      // Mesej yang berjaya dihantar akan dikemas kini melalui socket
     } catch (err) {
       console.error("Error sending message:", err);
       setError("Gagal menghantar mesej.");
-      // Rollback optimistic update if needed
-      // setMessages(prevMessages => prevMessages.filter(msg => msg.id !== optimisticMessage.id));
-      setNewMessage(messageToSend); // Kembalikan teks ke input jika gagal
+      setNewMessage(messageToSend);
     }
   };
 
@@ -174,7 +195,7 @@ function ChatPage() {
                     <div className="flex items-center space-x-3">
                        <Avatar className="h-10 w-10">
                            {/* TODO: Add Avatar Image if available */}
-                           <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                           <AvatarFallback>{chat.name?.substring(0, 2).toUpperCase() || '??'}</AvatarFallback>
                        </Avatar>
                        <div className="flex-1 min-w-0">
                           <p className="font-semibold truncate">{chat.name}</p>
@@ -184,7 +205,7 @@ function ChatPage() {
                           </p>
                        </div>
                        <p className="text-xs text-gray-400">
-                           {new Date(chat.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                           {chat.lastMessageTimestamp ? new Date(chat.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                        </p>
                     </div>
                   </div>
@@ -210,9 +231,9 @@ function ChatPage() {
                   ) : messages.length === 0 ? (
                     <p className="text-center text-gray-500">Tiada mesej dalam perbualan ini.</p>
                   ) : (
-                    messages.map((msg, index) => (
+                    messages.map((msg) => (
                       <div
-                        key={msg.id || index} // Guna index sebagai fallback key
+                        key={msg.id || msg.messageId} // Guna msg.id (dari DB) atau messageId (dari socket)
                         className={`flex mb-3 ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
@@ -224,13 +245,13 @@ function ChatPage() {
                         >
                           <p>{msg.body}</p>
                           <p className="text-xs opacity-70 mt-1 text-right">
-                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                           </p>
                         </div>
                       </div>
                     ))
                   )}
-                  <div ref={messagesEndRef} /> { /* Elemen kosong untuk auto-scroll */}
+                  <div ref={messagesEndRef} />
                 </ScrollArea>
                 <form onSubmit={handleSendMessage} className="p-4 border-t bg-white">
                   <div className="flex items-center space-x-2">
