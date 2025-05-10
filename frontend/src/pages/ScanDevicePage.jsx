@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Wifi, WifiOff, QrCode as QrCodeIcon, Loader2, Link as LinkIcon, XCircle, Smartphone, Trash2, Power } from 'lucide-react'; // Import ikon
+import api from '../services/api'; // BARU: Import api
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 let socket = null; // Define socket outside component
@@ -19,11 +20,11 @@ const dummyDevices = [
 
 // Contoh data had pelan (gantikan dengan data user/API)
 const planLimits = {
-    Free: 1,
-    Basic: 3,
-    Pro: 5
+    free: 1,
+    basic: 3,
+    pro: 5
 };
-const currentUserPlan = 'Basic'; // Contoh
+// const currentUserPlan = 'Basic'; // Ini mungkin patut datang dari user.membershipPlan
 
 function ScanDevicePage() {
   const { user } = useAuth();
@@ -33,193 +34,194 @@ function ScanDevicePage() {
   const [connectedDevices, setConnectedDevices] = useState([]); // State untuk senarai peranti
   const [isDeviceListLoading, setIsDeviceListLoading] = useState(true);
 
-   // TODO: Fetch connected devices list from API
-   useEffect(() => {
-       const fetchDevices = async () => {
-           setIsDeviceListLoading(true);
-           // Replace with actual API call
-           /*
-           try {
-               const response = await api.get('/whatsapp/devices'); // Assume this endpoint exists
-               setConnectedDevices(response.data);
-           } catch (error) {
-               console.error("Failed to fetch devices:", error);
-               toast.error("Could not load connected device list.");
-               setConnectedDevices(dummyDevices); // Fallback
-           } finally {
-               setIsDeviceListLoading(false);
-           }
-           */
-           // Simulation
-           setTimeout(() => {
-               setConnectedDevices(dummyDevices);
-               setIsDeviceListLoading(false);
-           }, 700);
-       };
-       if(user) {
-           fetchDevices();
-       }
-   }, [user]);
+  const currentUserPlan = user?.membershipPlan || 'Free';
+  console.log("[ScanDevicePage] User object from useAuth:", user);
+  console.log("[ScanDevicePage] currentUserPlan determined as:", currentUserPlan);
 
-  // Salin logik socket dari DashboardPage
-   const connectSocket = useCallback(() => {
-     if (!user?._id) {
-       console.log("User ID not available yet, delaying socket connection.");
-       setConnectionStatus('User not loaded');
-       return;
-     }
-     if (socket && socket.connected) {
-        console.log('Disconnecting existing socket before creating a new one.');
+  const limitForCurrentPlan = planLimits[currentUserPlan.toLowerCase()] || 1;
+  console.log("[ScanDevicePage] Limit for current plan (", currentUserPlan, ") is:", limitForCurrentPlan);
+
+  // Fetch devices (dijadikan useCallback)
+  const fetchDevices = useCallback(async () => {
+      if (!user) return; // Jangan fetch jika user belum ada
+      setIsDeviceListLoading(true);
+      try {
+          const response = await api.get('/whatsapp/devices');
+          setConnectedDevices(response.data || []); // API sepatutnya kembalikan array
+      } catch (error) {
+          console.error("Failed to fetch devices:", error);
+          toast.error("Could not load connected device list.");
+          setConnectedDevices([]); // Kosongkan jika gagal
+      } finally {
+          setIsDeviceListLoading(false);
+      }
+  }, [user]); // Dependency pada user
+
+  // useEffect untuk fetch devices pada muatan awal dan bila fetchDevices berubah
+  useEffect(() => {
+      fetchDevices();
+  }, [fetchDevices]);
+
+  // Logik socket
+  const connectSocket = useCallback(() => {
+    if (!user?._id) {
+      console.log("[ScanDevicePage] User ID not available, delaying socket connection.");
+      setConnectionStatus('User not loaded');
+      return;
+    }
+    if (socket && socket.connected) {
+        console.log("[ScanDevicePage] Disconnecting existing socket before creating a new one.");
         socket.disconnect();
-     }
-     console.log("Attempting to connect socket for QR scan...");
-     // Mungkin perlu bezakan socket ini jika Dashboard juga guna socket serentak?
-     // Buat masa ini, kita anggap ia berkongsi atau eksklusif.
-     socket = io(SOCKET_SERVER_URL, { query: { userId: user._id } });
+    }
+    console.log("[ScanDevicePage] Attempting to connect socket...");
+    socket = io(SOCKET_SERVER_URL, { query: { userId: user._id } });
 
-     socket.on('connect', () => {
-       console.log('ScanDevice Socket.IO Connected:', socket.id);
-       setSocketConnected(true);
-       // Minta status semasa sebaik sahaja bersambung
-       socket.emit('get_whatsapp_status'); 
-     });
-     socket.on('disconnect', (reason) => {
-       console.log('ScanDevice Socket.IO Disconnected:', reason);
-       setSocketConnected(false);
-       setConnectionStatus('disconnected');
-       setRawQrString(null);
-     });
-     socket.on('connect_error', (err) => {
-         console.error("ScanDevice Socket Connection Error:", err);
-         setSocketConnected(false);
-         setConnectionStatus('disconnected');
-         setRawQrString(null);
-         toast.error(`Server connection failed: ${err.message}`);
-     });
-     socket.on('whatsapp_status', (status) => {
-       console.log('ScanDevice WhatsApp status received:', status);
-       setConnectionStatus(status);
-       if (status !== 'waiting_qr') setRawQrString(null);
-       // Jika status bertukar connected/disconnected, muat semula senarai peranti
-       if (status === 'connected' || status === 'disconnected') {
-           // TODO: Panggil fetchDevices() atau trigger refresh
-           console.log("Status changed, should refresh device list.");
-       }
-     });
-     socket.on('whatsapp_qr', (qrString) => {
-       console.log('ScanDevice QR Code received');
-       setRawQrString(qrString);
-       setConnectionStatus('waiting_qr');
-     });
-     socket.on('error_message', (message) => {
-         console.error('ScanDevice Error from Backend:', message);
-         toast.error(message);
-         if (connectionStatus === 'Connecting...') setConnectionStatus('disconnected');
-     });
+    socket.on('connect', () => {
+      console.log("[ScanDevicePage] Socket.IO Connected, ID:", socket.id);
+      setSocketConnected(true);
+      socket.emit('get_whatsapp_status'); 
+    });
+    socket.on('disconnect', (reason) => {
+      console.log("[ScanDevicePage] Socket.IO Disconnected. Reason:", reason);
+      setSocketConnected(false);
+      setConnectionStatus('disconnected');
+      setRawQrString(null);
+    });
+    socket.on('connect_error', (err) => {
+      console.error("[ScanDevicePage] Socket Connection Error:", err);
+      setSocketConnected(false);
+      setConnectionStatus('disconnected');
+      setRawQrString(null);
+      toast.error(`Server connection failed: ${err.message}`);
+    });
+    socket.on('whatsapp_status', (status) => {
+      console.log("[ScanDevicePage] WhatsApp status received from backend:", status);
+      setConnectionStatus(status); // Ini masih okay untuk set state di sini
+      if (status !== 'waiting_qr') setRawQrString(null);
+      if (status === 'connected' || status === 'disconnected' || status === 'limit_reached') {
+          fetchDevices(); 
+      }
+    });
+    socket.on('whatsapp_qr', (qrString) => {
+      console.log("[ScanDevicePage] WhatsApp QR string received from backend:", qrString ? qrString.substring(0,30) + '...' : 'EMPTY_QR_STRING');
+      setRawQrString(qrString);
+      setConnectionStatus('waiting_qr');
+    });
+    socket.on('error_message', (message) => {
+      console.error("[ScanDevicePage] Error message from backend:", message);
+      toast.error(message);
+      // Elakkan setConnectionStatus di sini jika ia menyebabkan loop. 
+      // Backend patut hantar status yang betul jika error berlaku semasa connecting.
+      // if (connectionStatus === 'Connecting...') setConnectionStatus('disconnected'); 
+    });
 
-     // Pembersihan apabila komponen unmount
-     return () => {
-       console.log('Cleaning up ScanDevice socket connection...');
-       if (socket) {
-           socket.off('connect');
-           socket.off('disconnect');
-           socket.off('connect_error');
-           socket.off('whatsapp_status');
-           socket.off('whatsapp_qr');
-           socket.off('error_message');
-           if (socket.connected) socket.disconnect();
-           socket = null;
-       }
-     };
-   }, [user?._id]); // Dependency pada user ID
+    return () => {
+      console.log('[ScanDevicePage] Cleaning up socket connection...');
+      if (socket) {
+          socket.off('connect');
+          socket.off('disconnect');
+          socket.off('connect_error');
+          socket.off('whatsapp_status');
+          socket.off('whatsapp_qr');
+          socket.off('error_message');
+          if (socket.connected) socket.disconnect();
+          socket = null;
+      }
+    };
+  }, [user?._id, fetchDevices]);
 
-   useEffect(() => {
-     // Hanya setup socket jika user ada
-     if (user?._id) {
-        return connectSocket();
-     }
-   }, [user?._id, connectSocket]); // Connect socket apabila user ID tersedia
+  useEffect(() => {
+    if (user?._id) {
+        // Panggil connectSocket, yang akan mengembalikan fungsi cleanup
+        const cleanupSocket = connectSocket();
+        // Kembalikan fungsi cleanup ini dari useEffect
+        return cleanupSocket;
+    }
+  }, [user?._id, connectSocket]); // connectSocket kini lebih stabil
 
-   const handleConnectRequest = () => {
-     const currentDeviceCount = connectedDevices.filter(d => d.connected).length;
-     const limit = planLimits[currentUserPlan] || 1;
+  const handleConnectRequest = () => {
+    const currentActiveDeviceCount = connectedDevices.filter(d => d.connected).length;
+    const limit = limitForCurrentPlan;
 
-     if (currentDeviceCount >= limit) {
-         toast.error(`Cannot connect more devices. Your plan limit (${currentUserPlan}: ${limit}) has been reached.`);
-         return;
-     }
+    if (currentActiveDeviceCount >= limit) {
+        toast.error(`Cannot connect more devices. Your plan (${currentUserPlan}: ${limit} device(s)) limit has been reached.`);
+        return;
+    }
+    if (socket && socket.connected && user?._id) {
+      console.log(`[ScanDevicePage] Sending whatsapp_connect_request for user: ${user._id}`);
+      socket.emit('whatsapp_connect_request', user._id);
+      setConnectionStatus('Connecting...');
+      setRawQrString(null);
+      toast.info("Requesting new WhatsApp connection...");
+    } else {
+       console.warn("[ScanDevicePage] Cannot send connect request. Socket connected: ", socket?.connected, "User ID: ", user?._id);
+       toast.error("Connection to server not ready or user not available.");
+    }
+  };
 
-     if (socket && socket.connected && user?._id) {
-       console.log(`ScanDevice: Sending whatsapp_connect_request for user: ${user._id}`);
-       socket.emit('whatsapp_connect_request', user._id); // Mungkin perlu ID peranti spesifik?
-       setConnectionStatus('Connecting...');
-       setRawQrString(null);
-       toast.info("Requesting new WhatsApp connection...");
-     } else if (!socket || !socket.connected) {
-        toast.error("Connection to server not ready. Please try again later.");
-     } else if (!user?._id) {
-         toast.error("User ID not available. Please log in again.");
-     }
-   };
+  const handleDisconnectRequest = async (deviceId = null) => {
+      if (deviceId) { // Putuskan sambungan peranti spesifik dan padam dari DB
+          toast.info(`Attempting to remove device ${deviceId}...`);
+          try {
+              await api.delete(`/whatsapp/devices/${deviceId}`);
+              toast.success(`Device ${deviceId} removed successfully.`);
+              fetchDevices(); // Muat semula senarai
+              // Jika peranti yang dipadam adalah yang sedang aktif dalam sesi QR/status semasa, reset status
+              // Ini mungkin perlukan logik tambahan jika deviceId yang dipadam sama dengan yang sedang dipaparkan statusnya.
+              // Buat masa ini, kita hanya muat semula senarai.
+          } catch (error) {
+              console.error(`Failed to remove device ${deviceId}:`, error);
+              toast.error(error.response?.data?.message || `Could not remove device ${deviceId}.`);
+          }
+      } else { // Putuskan sambungan sesi imbasan QR semasa
+          if (socket && socket.connected) {
+              socket.emit('whatsapp_disconnect_request');
+              toast.info("Requesting current session disconnection...");
+          } else {
+               toast.error("No active server connection to disconnect session.");
+          }
+      }
+  }
 
-   const handleDisconnectRequest = (deviceId = null) => {
-       // Jika tiada deviceId diberi, assume putuskan sambungan sesi semasa
-       // Jika ada deviceId, putuskan sambungan peranti spesifik (perlukan API backend)
-       if (socket && socket.connected) {
-           if (deviceId) {
-               console.log(`ScanDevice: Sending whatsapp_disconnect_device request for device: ${deviceId}`);
-               // TODO: Perlukan event socket atau endpoint API baru
-               // socket.emit('whatsapp_disconnect_device', deviceId);
-               toast.info(`Requesting disconnection for device ${deviceId}... (Not Implemented)`);
-           } else {
-                console.log("ScanDevice: Sending whatsapp_disconnect_request for current session");
-                socket.emit('whatsapp_disconnect_request');
-                toast.info("Requesting WhatsApp disconnection...");
-           }
-       } else {
-            toast.error("No connection to server.");
-       }
-   }
+  // Papar status sambungan
+  const renderStatusDisplay = () => {
+    let icon = <Loader2 className="animate-spin h-5 w-5 mr-2" />;
+    let text = connectionStatus;
+    let variant = "secondary";
 
-   // Papar status sambungan
-   const renderStatusDisplay = () => {
-     let icon = <Loader2 className="animate-spin h-5 w-5 mr-2" />;
-     let text = connectionStatus;
-     let variant = "secondary";
-
-     switch (connectionStatus) {
-       case 'connected':
-         icon = <Wifi className="h-5 w-5 mr-2 text-green-600" />;
-         text = "Connected";
-         variant = "success";
+    switch (connectionStatus) {
+      case 'connected':
+        icon = <Wifi className="h-5 w-5 mr-2 text-green-600" />;
+        text = "Connected";
+        variant = "success";
+        break;
+      case 'disconnected':
+        icon = <WifiOff className="h-5 w-5 mr-2 text-red-600" />;
+        text = "Disconnected";
+        variant = "destructive";
+        break;
+      case 'waiting_qr':
+        icon = <QrCodeIcon className="h-5 w-5 mr-2 text-blue-600" />;
+        text = "Waiting for QR Scan";
+        variant = "outline";
+        break;
+      case 'Connecting...':
+         text = "Connecting...";
          break;
-       case 'disconnected':
-         icon = <WifiOff className="h-5 w-5 mr-2 text-red-600" />;
-         text = "Disconnected";
-         variant = "destructive";
-         break;
-       case 'waiting_qr':
-         icon = <QrCodeIcon className="h-5 w-5 mr-2 text-blue-600" />;
-         text = "Waiting for QR Scan";
-         variant = "outline";
-         break;
-       case 'Connecting...':
-          text = "Connecting...";
+       case 'User not loaded':
+          icon = <XCircle className="h-5 w-5 mr-2 text-yellow-600" />;
+          text = "User Not Ready";
           break;
-        case 'User not loaded':
-           icon = <XCircle className="h-5 w-5 mr-2 text-yellow-600" />;
-           text = "User Not Ready";
-           break;
-        default:
-         break;
-     }
-     return (
-         <Badge variant={variant} className="text-md px-3 py-1">
-            {icon}
-            {text}
-          </Badge>
-     );
-   };
+       default:
+        break;
+    }
+    return (
+        <Badge variant={variant} className="text-md px-3 py-1">
+           {icon}
+           {text}
+         </Badge>
+    );
+  };
 
   return (
     <div className="container mx-auto p-4 space-y-6">
@@ -233,8 +235,8 @@ function ScanDevicePage() {
                  {renderStatusDisplay()}
              </div>
              <CardDescription>
-                Scan the QR code with your WhatsApp application to link a new device.
-                Your current plan ({currentUserPlan}) allows up to {planLimits[currentUserPlan] || 1} connected device(s).
+                Scan the QR code with your WhatsApp. 
+                Your plan ({currentUserPlan}) allows up to {limitForCurrentPlan} connected device(s).
              </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center space-y-4">
@@ -268,14 +270,14 @@ function ScanDevicePage() {
       {/* Kad untuk Senarai Peranti Tersambung */}
        <Card>
            <CardHeader>
-               <CardTitle>Connected Devices</CardTitle>
+               <CardTitle>Your Connected Devices</CardTitle>
                <CardDescription>Manage devices linked to your account.</CardDescription>
            </CardHeader>
            <CardContent>
                {isDeviceListLoading ? (
                    <p>Loading device list...</p>
                ) : connectedDevices.length === 0 ? (
-                   <p className="text-muted-foreground">No devices are currently connected.</p>
+                   <p className="text-muted-foreground">No devices are currently linked to your account.</p>
                ) : (
                    <div className="space-y-3">
                        {connectedDevices.map(device => (
@@ -287,15 +289,14 @@ function ScanDevicePage() {
                                        <p className="text-sm text-muted-foreground">{device.number}</p>
                                    </div>
                                </div>
-                               {device.connected ? (
-                                   <Button variant="outline" size="sm" onClick={() => handleDisconnectRequest(device.id)}>
-                                       <Power className="mr-1.5 h-4 w-4" /> Disconnect
-                                   </Button>
-                               ) : (
-                                   <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => { /* TODO: Implement remove device */ toast.info('Remove function not implemented.') }}>
-                                       <Trash2 className="mr-1.5 h-4 w-4" /> Remove
-                                   </Button>
-                               )}
+                               <Button 
+                                   variant={device.connected ? "outline" : "destructive"} 
+                                   size="sm" 
+                                   onClick={() => handleDisconnectRequest(device.id)} // Sentiasa panggil dengan device.id
+                                >
+                                   {device.connected ? <Power className="mr-1.5 h-4 w-4" /> : <Trash2 className="mr-1.5 h-4 w-4" />}
+                                   {device.connected ? "Disconnect" : "Remove Registration"} 
+                               </Button>
                            </div>
                        ))}
                    </div>

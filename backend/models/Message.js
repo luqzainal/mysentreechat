@@ -35,6 +35,11 @@ const messageSchema = mongoose.Schema(
       enum: ['sending', 'sent', 'delivered', 'read', 'received', 'failed'],
       default: 'sent',
     },
+    sourceDeviceId: { // BARU: ID peranti dari mana mesej berasal atau diterima
+      type: String, 
+      required: false, // Jadikan false buat sementara untuk elak ralat pada data lama
+      index: true,     // Index untuk query pantas
+    }
     // Tambah medan lain jika perlu (cth: messageType, mediaUrl, etc.)
   },
   {
@@ -44,5 +49,6 @@ const messageSchema = mongoose.Schema(
 
 // Indeks kompaun untuk query sejarah chat
 messageSchema.index({ user: 1, chatJid: 1, timestamp: 1 });
+messageSchema.index({ user: 1, sourceDeviceId: 1, timestamp: 1 }); // Index baru
 
 module.exports = mongoose.model('Message', messageSchema); 

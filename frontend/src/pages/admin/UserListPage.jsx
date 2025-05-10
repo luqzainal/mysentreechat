@@ -33,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Pencil, ShieldCheck, UserX } from 'lucide-react'; // Import new icons
+import { Pencil, ShieldCheck, UserX, Trash2 } from 'lucide-react'; // Import new icons
 import {
   AlertDialog,
   AlertDialogContent,
@@ -63,6 +63,11 @@ const UserListPage = () => {
     const [userForRoleChange, setUserForRoleChange] = useState(null);
     const [newRoleForChange, setNewRoleForChange] = useState(null); // 'admin' or 'user'
     const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+
+    // State BARU untuk delete user dialog
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [userForDeletion, setUserForDeletion] = useState(null);
+    const [isDeletingUser, setIsDeletingUser] = useState(false);
 
     // Function to get token (not needed if interceptor works)
     // const getToken = () => { ... };
@@ -109,8 +114,8 @@ const UserListPage = () => {
         try {
             // Token added by interceptor
             const { data: updatedUser } = await api.put(
-                `/admin/users/${selectedUserForEdit._id}/plan`,
-                { plan: newPlanForSelectedUser } // Send new plan in body
+                `/admin/users/${selectedUserForEdit._id}`,
+                { membershipPlan: newPlanForSelectedUser } 
             );
 
             // Update user list in state
@@ -120,13 +125,13 @@ const UserListPage = () => {
                 )
             );
 
-            toast.success(`Plan for ${updatedUser.name} updated successfully to ${updatedUser.membershipPlan}.`); // Translate toast message
+            toast.success(`Plan for ${updatedUser.name} updated successfully to ${updatedUser.membershipPlan}.`);
             setIsEditDialogOpen(false); // Close dialog
 
         } catch (err) {
-            console.error("Error updating user plan:", err); // Translate error log
-            const message = err.response?.data?.message || "Failed to update plan."; // Translate error message
-            toast.error(message); // Translate toast message
+            console.error("Error updating user plan:", err);
+            const message = err.response?.data?.message || "Failed to update plan.";
+            toast.error(message);
         } finally {
             setIsUpdatingPlan(false);
         }
@@ -148,7 +153,7 @@ const UserListPage = () => {
         setIsUpdatingRole(true);
         try {
             const { data: updatedUser } = await api.put(
-                `/admin/users/${userForRoleChange._id}/role`,
+                `/admin/users/${userForRoleChange._id}`,
                 { role: newRoleForChange } // Send new role in body
             );
 
@@ -159,17 +164,46 @@ const UserListPage = () => {
                 )
             );
 
-            toast.success(`Role for ${updatedUser.name} successfully changed to ${updatedUser.role}.`); // Translate toast message
+            toast.success(`Role for ${updatedUser.name} successfully changed to ${updatedUser.role}.`);
             setIsRoleAlertOpen(false); // Close alert dialog
             setUserForRoleChange(null);
             setNewRoleForChange(null);
 
         } catch (err) {
-            console.error("Error changing user role:", err); // Translate error log
-            const message = err.response?.data?.message || "Failed to change role."; // Translate error message
-            toast.error(message); // Translate toast message
+            console.error("Error changing user role:", err);
+            const message = err.response?.data?.message || "Failed to change role.";
+            toast.error(message);
         } finally {
             setIsUpdatingRole(false);
+        }
+    };
+
+    // BARU: Function to open delete confirmation dialog
+    const handleOpenDeleteDialog = (userToDelete) => {
+        setUserForDeletion(userToDelete);
+        setIsDeleteDialogOpen(true);
+    };
+
+    // BARU: Function to confirm and delete user
+    const handleConfirmDeleteUser = async () => {
+        if (!userForDeletion) return;
+
+        setIsDeletingUser(true);
+        try {
+            // Andaikan endpoint /admin/users/:userId dengan method DELETE wujud
+            await api.delete(`/admin/users/${userForDeletion._id}`);
+            
+            setUsers(prevUsers => prevUsers.filter(u => u._id !== userForDeletion._id));
+            toast.success(`User ${userForDeletion.name} deleted successfully.`);
+            setIsDeleteDialogOpen(false);
+            setUserForDeletion(null);
+
+        } catch (err) {
+            console.error("Error deleting user:", err);
+            const message = err.response?.data?.message || "Failed to delete user.";
+            toast.error(message);
+        } finally {
+            setIsDeletingUser(false);
         }
     };
 
@@ -236,8 +270,8 @@ const UserListPage = () => {
                                     <Badge variant={getPlanBadgeVariant(u.membershipPlan)}>{u.membershipPlan || 'N/A'}</Badge>
                                 </TableCell>
                                 <TableCell>
-                                    {/* Format date in English locale */} 
-                                    {format(new Date(u.createdAt), 'PPpp')} 
+                                    {/* Tambah semakan untuk u.createdAt sebelum format */}
+                                    {u.createdAt ? format(new Date(u.createdAt), 'PPpp') : '-'}
                                 </TableCell>
                                 <TableCell className="text-right space-x-2">
                                    {/* Edit Plan Button */} 
@@ -284,11 +318,12 @@ const UserListPage = () => {
                                                 </div>
                                             </div>
                                             <DialogFooter>
-                                                 <DialogClose asChild>
-                                                     <Button type="button" variant="secondary" disabled={isUpdatingPlan}>Cancel</Button> {/* Translate button */}
+                                                 {/* Ujian: Buang asChild buat sementara */}
+                                                 <DialogClose>
+                                                     <Button type="button" variant="secondary" disabled={isUpdatingPlan}>Cancel</Button>
                                                  </DialogClose>
                                                 <Button onClick={handleUpdatePlan} disabled={isUpdatingPlan || newPlanForSelectedUser === selectedUserForEdit?.membershipPlan}>
-                                                    {isUpdatingPlan ? 'Updating...' : 'Update Plan'} {/* Translate button text */}
+                                                    {isUpdatingPlan ? 'Updating...' : 'Update Plan'}
                                                 </Button>
                                             </DialogFooter>
                                         </DialogContent>
@@ -305,33 +340,64 @@ const UserListPage = () => {
                                         }}>
                                            <AlertDialogTrigger asChild>
                                                 <Button 
-                                                    variant={u.role === 'admin' ? "secondary" : "destructive"} // Button style changes based on action
+                                                    variant={u.role === 'admin' ? "secondary" : "destructive"}
                                                     size="sm" 
                                                     onClick={() => handleOpenRoleChangeAlert(u)}
                                                 >
                                                     {u.role === 'admin' ? 
-                                                        <><UserX className="h-4 w-4 mr-1" /> Revoke Admin</> // Translate button text
-                                                        : <><ShieldCheck className="h-4 w-4 mr-1" /> Make Admin</> // Translate button text
+                                                        <><UserX className="h-4 w-4 mr-1" /> Revoke Admin</>
+                                                        : <><ShieldCheck className="h-4 w-4 mr-1" /> Make Admin</>
                                                     }
                                                 </Button>
                                            </AlertDialogTrigger>
                                            <AlertDialogContent>
                                                <AlertDialogHeader>
-                                                   <AlertDialogTitle>Confirm Role Change</AlertDialogTitle> {/* Translate dialog title */}
+                                                   <AlertDialogTitle>Confirm Role Change</AlertDialogTitle>
                                                    <AlertDialogDescription>
                                                        Are you sure you want to change the role of {userForRoleChange?.name} to {newRoleForChange}? 
                                                        {newRoleForChange === 'admin' ? ' They will gain administrative privileges.' : ' Their administrative privileges will be revoked.'} 
-                                                   </AlertDialogDescription> {/* Translate dialog description */}
+                                                   </AlertDialogDescription>
                                                </AlertDialogHeader>
                                                <AlertDialogFooter>
-                                                   <AlertDialogCancel disabled={isUpdatingRole}>Cancel</AlertDialogCancel> {/* Translate button */}
+                                                   <AlertDialogCancel disabled={isUpdatingRole}>Cancel</AlertDialogCancel>
                                                    <AlertDialogAction onClick={handleConfirmRoleChange} disabled={isUpdatingRole} className={newRoleForChange === 'admin' ? "" : "bg-destructive text-destructive-foreground hover:bg-destructive/90"}>
-                                                        {isUpdatingRole ? 'Updating...' : 'Confirm Change'} {/* Translate button text */}
+                                                        {isUpdatingRole ? 'Updating...' : 'Confirm Change'}
                                                    </AlertDialogAction>
                                                </AlertDialogFooter>
                                            </AlertDialogContent>
                                        </AlertDialog>
                                    )}
+
+                                   {/* BARU: Delete User Button & AlertDialog */}
+                                   <AlertDialog open={isDeleteDialogOpen && userForDeletion?._id === u._id} onOpenChange={(isOpen) => {
+                                        if (!isOpen) {
+                                            setIsDeleteDialogOpen(false);
+                                            setUserForDeletion(null);
+                                        }
+                                    }}>
+                                        <AlertDialogTrigger asChild>
+                                            <Button variant="destructive" size="icon" onClick={() => handleOpenDeleteDialog(u)} disabled={loggedInUser._id === u._id}>
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>Confirm User Deletion</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    Are you sure you want to delete the user "{userForDeletion?.name}"? 
+                                                    This action cannot be undone.
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeletingUser}>
+                                                    Cancel
+                                                </AlertDialogCancel>
+                                                <AlertDialogAction onClick={handleConfirmDeleteUser} disabled={isDeletingUser} className="bg-destructive hover:bg-destructive/90">
+                                                    {isDeletingUser ? "Deleting..." : "Delete User"}
+                                                </AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
                                 </TableCell>
                             </TableRow>
                         ))

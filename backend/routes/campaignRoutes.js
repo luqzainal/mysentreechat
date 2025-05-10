@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
 // @desc    Create a new campaign for a specific device
 // @route   POST /api/campaigns/:deviceId
 // @access  Private
-router.post('/', uploadMedia, async (req, res) => { // Guna middleware uploadMedia
+router.post('/', uploadMedia, async (req, res) => { 
   const { deviceId } = req.params;
   const {
     campaignName,
@@ -60,12 +60,16 @@ router.post('/', uploadMedia, async (req, res) => { // Guna middleware uploadMed
     caption,
     aiAgentTraining,
     useAI,
-    presenceDelay
+    presenceDelay,
+    campaignType // BARU: Terima campaignType
   } = req.body;
 
-  // Validasi input asas
   if (!campaignName) {
       return res.status(400).json({ message: 'Campaign name is required' });
+  }
+  // Validasi tambahan untuk campaignType jika perlu
+  if (campaignType && !['bulk', 'ai_chatbot'].includes(campaignType)) {
+      return res.status(400).json({ message: 'Invalid campaignType. Must be bulk or ai_chatbot.' });
   }
 
   try {
@@ -73,7 +77,7 @@ router.post('/', uploadMedia, async (req, res) => { // Guna middleware uploadMed
       userId: req.user.id,
       deviceId: deviceId,
       campaignName,
-      // Pastikan nilai boolean ditukar dari string jika perlu
+      campaignType: campaignType || (useAI === 'true' ? 'ai_chatbot' : 'bulk'), // Logik default berdasarkan useAI jika campaignType tidak diberi
       statusEnabled: statusEnabled === 'true',
       enableLink: enableLink === 'true',
       urlLink: enableLink === 'true' ? urlLink : '',
@@ -81,23 +85,22 @@ router.post('/', uploadMedia, async (req, res) => { // Guna middleware uploadMed
       aiAgentTraining,
       useAI: useAI === 'true',
       presenceDelay,
+      sentCount: 0, // Inisialisasi
+      failedCount: 0 // Inisialisasi
     };
 
-    // Jika ada fail media diupload
     if (req.file) {
-      newCampaignData.mediaPath = req.file.path; // Simpan path relatif/absolut dari multer
+      newCampaignData.mediaPath = req.file.path;
       newCampaignData.mediaOriginalName = req.file.originalname;
       newCampaignData.mediaMimeType = req.file.mimetype;
     }
 
     const campaign = await Campaign.create(newCampaignData);
-    res.status(201).json(campaign); // Kembalikan data kempen yang baru dibuat
+    res.status(201).json(campaign); 
 
   } catch (error) {
     console.error('Error creating campaign:', error);
-    // Jika error disebabkan fail upload (contoh: saiz terlalu besar), multer mungkin dah hantar response
     if (!res.headersSent) {
-       // Padam fail yang mungkin separuh diupload jika error berlaku selepas upload
        if (req.file && req.file.path) {
            const fs = require('fs');
            fs.unlink(req.file.path, (err) => {

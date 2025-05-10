@@ -153,16 +153,15 @@ const Header = () => {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                 <Link to="/account"> <UserCog className="mr-2 h-4 w-4" /> Account Profile</Link>
+                <Link to="/account"><UserCog className="mr-2 h-4 w-4" /> Account</Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                  <Link to="/media-storage"> <ImageIcon className="mr-2 h-4 w-4" /> Media Storage</Link>
               </DropdownMenuItem>
-              {/* Tambah Pautan Settings */}
-               <DropdownMenuItem asChild>
+              {/* <DropdownMenuItem asChild>
                  <Link to="/settings"> <Settings className="mr-2 h-4 w-4" /> Settings</Link>
-              </DropdownMenuItem>
-
+              </DropdownMenuItem> */}
+              <DropdownMenuSeparator />
               {/* Pautan Admin (jika user admin) */} 
               {user.role === 'admin' && (
                   <>
@@ -297,9 +296,9 @@ function App() {
         <Route path="/ai-chatbot" element={<AutoresponderPage />} />
         <Route path="/ai-chatbot/:numberId/campaigns" element={<CampaignListPage />} />
         <Route path="/ai-chatbot/:numberId/campaigns/create" element={<AddCampaignPage />} />
+        <Route path="/add-campaign" element={<AddCampaignPage />} />
         <Route path="/media-storage" element={<MediaStoragePage />} />
         <Route path="/account" element={<AccountPage />} />
-        {/* Laluan BARU untuk Settings */}
         <Route path="/settings" element={<SettingsPage />} />
 
         {/* Laluan Admin (dilindungi) */}

@@ -14,8 +14,10 @@ const adminRoutes = require('./routes/adminRoutes.js');
 const contactRoutes = require('./routes/contactRoutes.js');
 const autoresponderRoutes = require('./routes/autoresponderRoutes.js'); 
 const mediaRoutes = require('./routes/mediaRoutes.js');
-const { initializeWhatsAppService, getWhatsAppSocket, connectToWhatsApp, destroyClient } = require('./services/whatsappService.js');
+const aiChatbotRoutes = require('./routes/aiChatbotRoutes.js');
+const { initializeWhatsAppService, getWhatsAppSocket, connectToWhatsApp, destroyClientByUserId } = require('./services/whatsappService.js');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware.js');
+const WhatsappDevice = require('./models/whatsappDevice.js');
 
 dotenv.config();
 
@@ -58,6 +60,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/ai-chatbot', aiChatbotRoutes);
 
 // Initialize WhatsApp Service selepas io dicipta
 initializeWhatsAppService(io);
@@ -118,10 +121,14 @@ io.on('connection', (socket) => {
   });
 
    // Handle permintaan putus sambungan
-   socket.on('whatsapp_disconnect_request', async () => {
-        if (!userId) return socket.emit('error_message', 'Cannot disconnect without User ID');
-        console.log(`Received whatsapp_disconnect_request from ${userId} (Socket: ${socket.id})`);
-        await destroyClient(userId);
+   socket.on('whatsapp_disconnect_request', async (requestingUserId) => {
+        console.log(`Received whatsapp_disconnect_request from user: ${requestingUserId} (Socket: ${socket.id})`);
+        if (!userId || userId !== requestingUserId) {
+             console.warn(`User ID mismatch on disconnect request: Socket User ID=${userId}, Requesting User ID=${requestingUserId}. Action denied.`);
+             return socket.emit('error_message', 'User ID mismatch for disconnect request.');
+        }
+        console.log(`Forwarding disconnect request to whatsappService for user ${userId}`);
+        await destroyClientByUserId(userId);
    });
 
   // Handle putus sambungan peranti spesifik
@@ -143,15 +150,36 @@ io.on('connection', (socket) => {
 const getClientStatus = async (userId) => {
     const client = getWhatsAppSocket(userId);
     if (client) {
+        console.log(`[server.cjs] getClientStatus: Client found in Map for user ${userId}. Getting state from client...`);
         try {
             const state = await client.getState();
+            console.log(`[server.cjs] getClientStatus: State from client.getState() for user ${userId} is '${state}'`);
             return state;
         } catch (error) {
-            console.error(`Error getting client state for user ${userId}:`, error);
-            return null;
+            console.error(`[server.cjs] getClientStatus: Error getting client state for user ${userId}:`, error);
+            // Jika client.getState() gagal, mungkin client dalam keadaan tidak baik.
+            // Kita boleh anggap disconnected dan cuba bersihkan client ini.
+            console.log(`[server.cjs] getClientStatus: Attempting to cleanup problematic client for user ${userId} due to getState error.`);
+            // Panggil fungsi pembersihan dari whatsappService jika ada, atau implementasi di sini.
+            // Contoh: destroyClientByUserId(userId); // Perlu import jika mahu guna di sini.
+            return 'disconnected'; // Kembalikan disconnected jika getState gagal
+        }
+    } else {
+        console.log(`[server.cjs] getClientStatus: Client NOT found in Map for user ${userId}. Checking DB for last known status...`);
+        // Sebagai fallback, cuba dapatkan status terakhir dari DB jika client tiada dalam memori
+        try {
+            // Andaikan kita semak WhatsappDevice atau WhatsappConnection
+            const device = await WhatsappDevice.findOne({ userId: userId }).sort({ lastConnectedAt: -1 }); // Atau model & field status yang sesuai
+            if (device && device.connectionStatus) {
+                console.log(`[server.cjs] getClientStatus: Status from DB for user ${userId} is '${device.connectionStatus}'`);
+                return device.connectionStatus;
+            }
+            console.log(`[server.cjs] getClientStatus: No device record or status in DB for user ${userId}. Returning 'disconnected'.`);
+        } catch (dbError) {
+            console.error(`[server.cjs] getClientStatus: DB error fetching status for user ${userId}:`, dbError);
         }
     }
-    return null;
+    return 'disconnected'; // Default jika tiada client dan tiada info DB
 };
 
 // Fungsi helper untuk memulakan sesi WhatsApp

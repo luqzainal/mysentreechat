@@ -4,15 +4,28 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { SendHorizontal } from 'lucide-react';
+import { SendHorizontal, Smartphone } from 'lucide-react';
 import api from '../services/api'; // Instance Axios
 import io from 'socket.io-client';
 import { useAuth } from '../contexts/AuthContext'; // Anda mungkin perlukan ini untuk userId
+import { toast } from 'sonner'; // BARU: Import toast
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 function ChatPage() {
+  const [userDevices, setUserDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
+
   const [chats, setChats] = useState([]);
+  const [currentChatMessages, setCurrentChatMessages] = useState([]);
   const [selectedChatJid, setSelectedChatJid] = useState(null);
-  const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -26,86 +39,85 @@ function ChatPage() {
   };
 
   useEffect(() => {
+    // Fetch senarai peranti pengguna
+    const fetchUserDevices = async () => {
+      if (!user) return;
+      setIsLoadingDevices(true);
+      try {
+        const response = await api.get('/whatsapp/devices');
+        setUserDevices(response.data || []);
+        if (response.data && response.data.length > 0) {
+          setSelectedDeviceId(response.data[0].id); // Pilih peranti pertama sebagai default
+        } else {
+          toast.info("No WhatsApp device connected. Please connect a device on Scan Device page.");
+        }
+      } catch (err) {
+        console.error("Error fetching user devices:", err);
+        toast.error("Could not load your WhatsApp devices.");
+      } finally {
+        setIsLoadingDevices(false);
+      }
+    };
+    fetchUserDevices();
+
     // Fetch chat list
     const fetchChats = async () => {
+      if (!user || !selectedDeviceId) {
+        setChats([]);
+        setLoadingChats(false);
+        return;
+      }
       setLoadingChats(true);
       setError(null);
       try {
-        const response = await api.get('/whatsapp/chats');
-        setChats(response.data);
+        const response = await api.get(`/whatsapp/chats?deviceId=${selectedDeviceId}`);
+        setChats(response.data || []);
       } catch (err) {
         console.error("Error fetching chats:", err);
         setError("Gagal memuatkan senarai perbualan.");
+        setChats([]);
       }
       setLoadingChats(false);
     };
     fetchChats();
 
     // Setup Socket.IO
-    if (user && user._id) {
-        // Dapatkan URL backend dari environment variable Vite
-        const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'; 
-        console.log(`Connecting socket to: ${SOCKET_URL}`);
+    if (user && user._id && selectedDeviceId) {
+        const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'; 
+        if (socket.current) socket.current.disconnect();
+        
         socket.current = io(SOCKET_URL, {
-            query: { userId: user._id }
+            query: { userId: user._id, deviceId: selectedDeviceId } 
         });
+        console.log(`Connecting socket for chat with userId: ${user._id} and deviceId: ${selectedDeviceId}`);
 
-        socket.current.on('connect', () => {
-            console.log('Socket connected for chat:', socket.current.id);
-        });
-
+        socket.current.on('connect', () => console.log('Socket connected for chat:', socket.current.id));
         socket.current.on('new_whatsapp_message', (messageData) => {
-            console.log('New message received via socket:', messageData);
-            const chatJid = messageData.fromMe ? messageData.receiver : messageData.sender;
-
-            // Kemaskini mesej jika chat sedang dipilih
-            if (chatJid === selectedChatJid) {
-                setMessages((prevMessages) => [...prevMessages, messageData]);
+            console.log('New message via socket:', messageData);
+            if (messageData.sourceDeviceId !== selectedDeviceId) {
+                console.log(`Message from different device (${messageData.sourceDeviceId}), ignoring for current view (${selectedDeviceId})`);
+                return;
             }
 
-            // Kemaskini senarai chats dengan mesej & timestamp terkini
+            const chatJid = messageData.fromMe ? messageData.receiver : messageData.sender;
+            if (chatJid === selectedChatJid) {
+                setCurrentChatMessages((prevMessages) => [...prevMessages, messageData]);
+            }
             setChats(prevChats => {
                 const chatIndex = prevChats.findIndex(c => c.jid === chatJid);
                 let updatedChat;
-                let otherChats;
-
+                const otherChats = prevChats.filter(c => c.jid !== chatJid);
                 if (chatIndex > -1) {
-                    // Chat sedia ada, kemaskini dan bawa ke atas
-                    updatedChat = {
-                        ...prevChats[chatIndex],
-                        lastMessageBody: messageData.body,
-                        lastMessageTimestamp: messageData.timestamp,
-                        lastMessageFromMe: messageData.fromMe
-                    };
-                    otherChats = prevChats.filter(c => c.jid !== chatJid);
+                    updatedChat = { ...prevChats[chatIndex], lastMessageBody: messageData.body, lastMessageTimestamp: messageData.timestamp, lastMessageFromMe: messageData.fromMe };
                 } else {
-                    // Chat baru, perlu dapatkan nama (jika ada) atau guna nombor
-                    // Ini mungkin memerlukan panggilan API tambahan atau struktur data berbeza
-                    // Buat masa ini, kita cipta chat baru dengan info asas
-                    updatedChat = {
-                        jid: chatJid,
-                        name: chatJid.split('@')[0], // Guna nombor sebagai fallback
-                        lastMessageBody: messageData.body,
-                        lastMessageTimestamp: messageData.timestamp,
-                        lastMessageFromMe: messageData.fromMe
-                    };
-                    otherChats = prevChats;
-                     // Mungkin fetch nama kenalan di sini jika perlu
-                     // api.get(`/contacts/by-number/${chatJid.split('@')[0]}`).then(...) 
+                    updatedChat = { jid: chatJid, name: messageData.senderName || chatJid.split('@')[0], lastMessageBody: messageData.body, lastMessageTimestamp: messageData.timestamp, lastMessageFromMe: messageData.fromMe };
                 }
-                return [updatedChat, ...otherChats]; // Letak chat terkini di atas
+                return [updatedChat, ...otherChats].sort((a, b) => new Date(b.lastMessageTimestamp) - new Date(a.lastMessageTimestamp));
             });
         });
+        socket.current.on('disconnect', (reason) => console.log('Socket disconnected:', reason));
+        socket.current.on('connect_error', (err) => console.error('Socket connection error:', err));
 
-        socket.current.on('disconnect', (reason) => {
-            console.log('Socket disconnected:', reason);
-        });
-
-        socket.current.on('connect_error', (err) => {
-            console.error('Socket connection error:', err);
-        });
-
-        // Cleanup on component unmount
         return () => {
             if (socket.current) {
                 console.log('Disconnecting chat socket...');
@@ -114,35 +126,34 @@ function ChatPage() {
         };
     }
 
-  }, [user, selectedChatJid]);
+  }, [user, selectedDeviceId, selectedChatJid]);
 
   useEffect(() => {
     // Fetch messages when a chat is selected
     const fetchMessages = async () => {
-      if (!selectedChatJid) return;
+      if (!selectedChatJid || !selectedDeviceId) return;
       setLoadingMessages(true);
       setError(null);
-      setMessages([]);
+      setCurrentChatMessages([]);
       try {
         const phoneNumber = selectedChatJid.split('@')[0];
-        const response = await api.get(`/whatsapp/chat/${phoneNumber}`);
-        // Pastikan data adalah array
-        setMessages(Array.isArray(response.data) ? response.data : []); 
+        const response = await api.get(`/whatsapp/chat/${phoneNumber}?deviceId=${selectedDeviceId}`);
+        setCurrentChatMessages(Array.isArray(response.data) ? response.data : []); 
       } catch (err) {
         console.error("Error fetching messages:", err);
         setError("Gagal memuatkan mesej.");
-        setMessages([]); // Pastikan state adalah array kosong jika ralat
+        setCurrentChatMessages([]);
       }
       setLoadingMessages(false);
     };
 
     fetchMessages();
-  }, [selectedChatJid]);
+  }, [selectedChatJid, selectedDeviceId]);
 
   // Auto-scroll ke bawah apabila mesej baru ditambah
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [currentChatMessages]);
 
   const handleSelectChat = (jid) => {
     setSelectedChatJid(jid);
@@ -228,10 +239,10 @@ function ChatPage() {
                 <ScrollArea className="flex-1 bg-gray-50 p-4">
                   {loadingMessages ? (
                     <p className="text-center text-gray-500">Memuatkan mesej...</p>
-                  ) : messages.length === 0 ? (
+                  ) : currentChatMessages.length === 0 ? (
                     <p className="text-center text-gray-500">Tiada mesej dalam perbualan ini.</p>
                   ) : (
-                    messages.map((msg) => (
+                    currentChatMessages.map((msg) => (
                       <div
                         key={msg.id || msg.messageId} // Guna msg.id (dari DB) atau messageId (dari socket)
                         className={`flex mb-3 ${msg.fromMe ? 'justify-end' : 'justify-start'}`}

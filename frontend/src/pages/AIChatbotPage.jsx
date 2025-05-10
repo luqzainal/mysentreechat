@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; // Import Avatar
 import { Switch } from "@/components/ui/switch"; // Import Switch
 import { Input } from "@/components/ui/input"; // Import Input for Search
-import { Search, Paperclip, Bot as BotIcon, Send, PlusCircle, List, Loader2 } from 'lucide-react'; // Import icons
+import { Search, Paperclip, Bot as BotIcon, Send, PlusCircle, List, Loader2, Settings as SettingsIcon } from 'lucide-react'; // Import icons
 import { Label } from "@/components/ui/label";
 
 // // Contoh data DIBUANG - akan dimuat dari API
@@ -20,110 +20,60 @@ const AutoresponderPage = () => {
   const [connectedNumbers, setConnectedNumbers] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState({}); // Track status update per number
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState({});
   const { user } = useAuth();
 
-  // Gantikan dengan fetch data sebenar
   useEffect(() => {
-    const fetchConnectedNumbers = async () => {
+    const fetchAiDeviceSummary = async () => {
       setIsLoading(true);
       try {
-        // TODO: Ganti dengan endpoint API sebenar
-        // Gunakan searchTerm jika backend menyokong carian server-side
-        // const response = await api.get(`/whatsapp/connected-numbers?search=${searchTerm}`);
-        // setConnectedNumbers(response.data);
+        const response = await api.get('/ai-chatbot/devices-summary');
+        const devicesSummary = response.data || [];
 
-        // Simulasi API Call dengan filter client-side
-         const dummyDataFromApi = [
-          {
-            id: '1',
-            name: 'Hadi Client Account Representative',
-            number: '601133045231',
-            avatarUrl: 'https://avatar.vercel.sh/hadi.png',
-            stats: { sent: 0, items: 0 },
-            statusEnabled: false,
-            needsSetup: true,
-          },
-          {
-            id: '2',
-            name: 'Farhana',
-            number: '60189634390',
-            avatarUrl: 'https://avatar.vercel.sh/farhana.png',
-            stats: { sent: 1286, items: 3 },
-            statusEnabled: true,
-            needsSetup: false,
-          },
-           {
-            id: '3',
-            name: 'Support Team',
-            number: '60123456789',
-            avatarUrl: 'https://avatar.vercel.sh/support.png',
-            stats: { sent: 500, items: 1 },
-            statusEnabled: true,
-            needsSetup: false,
-          },
-        ];
-
-        // Simulasi delay network
-        await new Promise(resolve => setTimeout(resolve, 600));
-
-        const filteredData = dummyDataFromApi.filter(num =>
-              num.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              num.number.includes(searchTerm)
+        // Penapisan client-side (jika backend tidak menyokong carian)
+        const filteredData = devicesSummary.filter(device =>
+              (device.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+              (device.number?.toLowerCase() || '').includes(searchTerm.toLowerCase())
           );
-         setConnectedNumbers(filteredData);
+        setConnectedNumbers(filteredData);
 
       } catch (error) {
-        console.error("Failed to fetch connected numbers:", error);
-        toast.error("Failed to load connected numbers.");
-        setConnectedNumbers([]); // Set to empty on error
+        console.error("Failed to fetch AI device summary:", error);
+        toast.error("Failed to load AI device summary.");
+        setConnectedNumbers([]);
       } finally {
         setIsLoading(false);
       }
     };
 
     if (user) {
-       // Debounce search or fetch directly
-       // Untuk kesederhanaan, kita fetch setiap kali searchTerm berubah
-       fetchConnectedNumbers();
+       fetchAiDeviceSummary();
     } else {
         setIsLoading(false);
         setConnectedNumbers([]);
     }
   }, [user, searchTerm]);
 
-  const handleStatusChange = async (numberId, newStatus) => {
-    setIsUpdatingStatus(prev => ({ ...prev, [numberId]: true }));
-    console.log(`Updating status for ${numberId} to ${newStatus}`);
-    // toast.info(`Updating status for number ${numberId}...`); // Maybe too noisy
-
-    // TODO: Implement API call sebenar
-    /*
+  const handleStatusChange = async (deviceId, newAiStatus) => {
+    setIsUpdatingStatus(prev => ({ ...prev, [deviceId]: true }));
     try {
-        const response = await api.put(`/whatsapp/numbers/${numberId}/status`, { isEnabled: newStatus });
-        // Update state dengan data dari response
-        setConnectedNumbers(prev => prev.map(num => num.id === numberId ? response.data : num));
-        toast.success(`Status updated for ${numberId}.`);
+        const response = await api.put(`/ai-chatbot/devices/${deviceId}/status`, { isEnabled: newAiStatus });
+        const updatedDeviceSummary = response.data;
+
+        // Kemas kini state dengan data yang dikembalikan dari API
+        setConnectedNumbers(prevNumbers => 
+            prevNumbers.map(num => 
+                num.id === deviceId ? updatedDeviceSummary : num
+            )
+        );
+        toast.success(`AI status for ${updatedDeviceSummary.name || deviceId} updated.`);
     } catch (error) {
-        console.error("Failed to update status:", error);
-        toast.error(`Failed to update status for ${numberId}.`);
-        // Tidak perlu revert state jika API gagal, biarkan UI tunjuk state asal
+        console.error(`Failed to update AI status for ${deviceId}:`, error);
+        toast.error(error.response?.data?.message || `Failed to update AI status.`);
+        // Tidak perlu revert state di sini, UI akan tunjukkan state asal jika API gagal
     } finally {
-        setIsUpdatingStatus(prev => ({ ...prev, [numberId]: false }));
+        setIsUpdatingStatus(prev => ({ ...prev, [deviceId]: false }));
     }
-    */
-
-    // Simulasi API call
-    await new Promise(resolve => setTimeout(resolve, 700));
-    // Update state selepas simulasi berjaya
-     setConnectedNumbers(prev =>
-       prev.map(num =>
-         num.id === numberId ? { ...num, statusEnabled: newStatus } : num
-       )
-     );
-    toast.success(`Status updated for ${numberId} (Simulation).`);
-    setIsUpdatingStatus(prev => ({ ...prev, [numberId]: false }));
-
   };
 
   // Tunjukkan loader utama hanya semasa muatan awal
@@ -142,17 +92,24 @@ const AutoresponderPage = () => {
               <h1 className="text-3xl font-bold">AI Chatbot</h1>
               <p className="text-muted-foreground">Manage campaigns and settings for your connected numbers.</p>
             </div>
-           {/* Search Bar */}
-           <div className="relative w-full max-w-xs">
-                <Input
-                    type="search"
-                    placeholder="Search by name or number..."
-                    className="pl-10" // Add padding for icon
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-            </div>
+            <div className="flex items-center space-x-3">
+                <Link to="/settings">
+                  <Button variant="outline">
+                    <SettingsIcon className="mr-2 h-4 w-4" /> 
+                    AI Settings
+                  </Button>
+                </Link>
+                <div className="relative w-full max-w-xs">
+                    <Input
+                        type="search"
+                        placeholder="Search by name or number..."
+                        className="pl-10" 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                </div>
+           </div>
        </div>
 
       {/* Grid untuk senarai nombor */}

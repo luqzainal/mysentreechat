@@ -33,6 +33,10 @@ const whatsappDeviceSchema = new mongoose.Schema({
   },
   lastConnectedAt: {
       type: Date
+  },
+  isAiEnabled: { // BARU: Untuk status AI Chatbot pada peranti ini
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true // Tambah createdAt dan updatedAt

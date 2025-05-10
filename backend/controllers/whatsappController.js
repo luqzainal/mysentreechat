@@ -1,6 +1,7 @@
 const Contact = require('../models/Contact.js');
 const Message = require('../models/Message.js');
-const { getWhatsAppSocket, sendMessage: sendWhatsappMessage } = require('../services/whatsappService.js');
+const Campaign = require('../models/Campaign.js');
+const { getWhatsAppSocket, sendMessage: sendWhatsappMessageViaService } = require('../services/whatsappService.js');
 const { processSpintax } = require('../utils/spintaxUtils.js');
 
 // Fungsi helper untuk format nombor ke JID WhatsApp
@@ -18,29 +19,24 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // @route   POST /whatsapp/bulk
 // @access  Private
 const sendBulkMessage = async (req, res) => {
-  const { message, contactIds } = req.body;
-  const userId = req.user._id; // Dari middleware protect
+  const { message, contactIds, campaignId, deviceId } = req.body;
+  const userId = req.user._id;
 
   if (!message || !contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
     return res.status(400).json({ message: 'Message and at least one contact ID are required.' });
   }
+  if (!campaignId) {
+    return res.status(400).json({ message: 'campaignId is required for bulk messaging.' });
+  }
+  if (!deviceId) {
+    return res.status(400).json({ message: 'deviceId is required.'});
+  }
 
-  // Dapatkan client untuk user ini
   const client = getWhatsAppSocket(userId);
 
   if (!client) {
-     // Cuba semak status dari DB juga?
-     return res.status(400).json({ message: 'WhatsApp connection is not active for this user. Please connect on the Dashboard.' });
+     return res.status(400).json({ message: 'WhatsApp connection is not active for this user. Please connect first.' });
   }
-  // Semakan state client (jika perlu, tapi service sepatutnya handle ralat jika tak connected)
-  // try {
-  //   const state = await client.getState();
-  //   if (state !== 'CONNECTED') {
-  //        return res.status(400).json({ message: `WhatsApp is not connected (state: ${state}). Please check the Dashboard.` });
-  //   }
-  // } catch (e) {
-  //     return res.status(500).json({ message: 'Could not verify WhatsApp connection state.' });
-  // }
 
   try {
     const contacts = await Contact.find({ 
@@ -60,22 +56,33 @@ const sendBulkMessage = async (req, res) => {
       const targetJid = contact.phoneNumber;
       try {
         const spunMessage = processSpintax(message);
-        console.log(`Sending bulk message (spun) to ${contact.name} (${targetJid}): ${spunMessage}`);
+        console.log(`Sending bulk message (spun) to ${contact.name} (${targetJid}) for campaign ${campaignId}`);
         
-        // Guna fungsi dari service, hantar userId juga
-        await sendWhatsappMessage(userId, targetJid, spunMessage);
+        await sendWhatsappMessageViaService(userId, targetJid, spunMessage, deviceId);
+        
         results.push({ name: contact.name, number: contact.phoneNumber, status: 'Success' });
         successCount++;
       } catch (error) {
-        console.error(`Failed to send bulk to ${targetJid}:`, error);
+        console.error(`Failed to send bulk to ${targetJid} for campaign ${campaignId}:`, error);
         results.push({ name: contact.name, number: contact.phoneNumber, status: 'Failed', error: error.message });
         failCount++;
       }
       await delay(Math.random() * 2000 + 1000); 
     }
 
+    if (campaignId) {
+        try {
+            await Campaign.findByIdAndUpdate(campaignId, {
+                $inc: { sentCount: successCount, failedCount: failCount }
+            });
+            console.log(`Campaign ${campaignId} stats updated: ${successCount} sent, ${failCount} failed.`);
+        } catch (campaignUpdateError) {
+            console.error(`Failed to update campaign stats for ${campaignId}:`, campaignUpdateError);
+        }
+    }
+
     res.json({
-        message: `Sending process completed. Success: ${successCount}, Failed: ${failCount}`,
+        message: `Bulk sending process completed. Success: ${successCount}, Failed: ${failCount}`,
         results: results
     });
 
@@ -90,38 +97,39 @@ const sendBulkMessage = async (req, res) => {
 // @access  Private
 const getChatHistory = async (req, res) => {
   const { phoneNumber } = req.params;
+  const { deviceId } = req.query; // Terima deviceId dari query parameter
   const userId = req.user._id;
 
   if (!phoneNumber) {
     return res.status(400).json({ message: 'Phone number parameter is required.' });
   }
+  if (!deviceId) {
+    return res.status(400).json({ message: 'deviceId query parameter is required.' });
+  }
 
-  // Pastikan format JID yang betul
   const chatJid = formatToJid(phoneNumber);
 
   try {
-    // Dapatkan mesej dari DB yang melibatkan pengguna ini dan nombor telefon ini
-    // Anggap `user` field dalam Message model merujuk kepada pengguna aplikasi kita
-    // dan `chatJid` merujuk kepada nombor WhatsApp lawan bicara
     const messages = await Message.find({
       user: userId,
       chatJid: chatJid, 
+      sourceDeviceId: deviceId // Tapis berdasarkan deviceId
     })
-    .sort({ timestamp: 1 }) // Susun ikut timestamp
-    .limit(100); // Hadkan bilangan mesej (optional)
+    .sort({ timestamp: 1 })
+    .limit(100); 
 
-    // Format mesej mengikut keperluan frontend { id, body, timestamp, fromMe }
     const formattedMessages = messages.map(msg => ({
-        id: msg._id, // Guna _id dari MongoDB
+        id: msg._id, 
         body: msg.body,
         timestamp: msg.timestamp,
-        fromMe: msg.fromMe // Medan ini perlu wujud dalam model Message
+        fromMe: msg.fromMe,
+        // sourceDeviceId: msg.sourceDeviceId // Boleh sertakan jika frontend perlukannya
     }));
 
     res.json(formattedMessages);
 
   } catch (error) {
-    console.error(`Error fetching chat history for ${chatJid}:`, error);
+    console.error(`Error fetching chat history for ${chatJid}, device ${deviceId}:`, error);
     res.status(500).json({ message: 'Server error fetching chat history.' });
   }
 };
@@ -130,44 +138,42 @@ const getChatHistory = async (req, res) => {
 // @route   POST /whatsapp/send
 // @access  Private
 const sendMessage = async (req, res) => {
-  const { to, message } = req.body;
+  const { to, message, deviceId } = req.body;
   const userId = req.user._id;
 
   if (!to || !message) {
     return res.status(400).json({ message: 'Recipient number (to) and message are required.' });
   }
+  if (!deviceId) {
+    return res.status(400).json({ message: 'deviceId is required to send message.' });
+  }
 
-  // Pastikan format JID yang betul
   const targetJid = formatToJid(to);
 
   try {
-    // Guna fungsi dari whatsappService, hantar userId
-    const sentMessage = await sendWhatsappMessage(userId, targetJid, message);
+    const sentMessage = await sendWhatsappMessageViaService(userId, targetJid, message, deviceId);
     
-    // Selepas berjaya hantar, simpan ke database
-     try {
-         const newMessage = new Message({
-             user: userId,
-             chatJid: targetJid,
-             body: message,
-             timestamp: new Date(sentMessage.timestamp * 1000), // Guna timestamp dari mesej dihantar
-             fromMe: true,
-             messageId: sentMessage.id._serialized, // Guna ID dari whatsapp-web.js
-             status: 'sent'
-         });
-         await newMessage.save();
-         console.log(`Sent message to ${targetJid} saved to DB.`);
-     } catch (dbError) {
-         console.error(`Failed to save sent message for ${targetJid} to DB:`, dbError);
-         // Jangan gagalkan request utama hanya kerana gagal simpan DB,
-         // tapi mungkin log atau hantar notifikasi
-     }
+    try {
+        const newMessage = new Message({
+            user: userId,
+            chatJid: targetJid,
+            body: message,
+            timestamp: new Date(sentMessage.timestamp * 1000),
+            fromMe: true,
+            messageId: sentMessage.id._serialized,
+            status: 'sent',
+            sourceDeviceId: deviceId
+        });
+        await newMessage.save();
+        console.log(`Sent message to ${targetJid} from device ${deviceId} saved to DB.`);
+    } catch (dbError) {
+        console.error(`Failed to save sent message for ${targetJid} (device ${deviceId}) to DB:`, dbError);
+    }
 
     res.status(200).json({ message: 'Message sent successfully.', messageId: sentMessage.id._serialized });
 
   } catch (error) {
-    console.error(`Error sending message to ${targetJid}:`, error);
-    // Hantar ralat yang lebih spesifik jika boleh (cth., dari whatsappService)
+    console.error(`Error sending message to ${targetJid} from device ${deviceId}:`, error);
     res.status(500).json({ message: error.message || 'Failed to send message.' });
   }
 };
@@ -177,24 +183,32 @@ const sendMessage = async (req, res) => {
 // @access  Private
 const getChats = async (req, res) => {
     const userId = req.user._id;
+    const { deviceId } = req.query; // Terima deviceId dari query parameter
+
+    if (!deviceId) {
+        return res.status(400).json({ message: 'deviceId query parameter is required.' });
+    }
+
     try {
-        // 1. Agregasi mesej untuk dapatkan mesej terakhir bagi setiap chatJid
+        const matchCriteria = {
+            user: userId,
+            sourceDeviceId: deviceId // Tapis berdasarkan deviceId
+        };
+
         const latestMessages = await Message.aggregate([
-            { $match: { user: userId } }, // Hanya mesej pengguna ini
-            { $sort: { timestamp: -1 } }, // Susun ikut timestamp terbaru dahulu
+            { $match: matchCriteria }, 
+            { $sort: { timestamp: -1 } }, 
             {
                 $group: {
-                    _id: "$chatJid", // Kumpulkan berdasarkan chatJid
+                    _id: "$chatJid", 
                     lastMessageTimestamp: { $first: "$timestamp" },
                     lastMessageBody: { $first: "$body" },
                     lastMessageFromMe: { $first: "$fromMe" },
-                    // Boleh tambah field lain jika perlu, cth: unreadCount
                 }
             },
-            { $sort: { lastMessageTimestamp: -1 } } // Susun chat ikut mesej terbaru
+            { $sort: { lastMessageTimestamp: -1 } } 
         ]);
 
-        // 2. Dapatkan nama kenalan (jika ada) untuk setiap chatJid
         const chatJids = latestMessages.map(msg => msg._id);
         const contacts = await Contact.find({ user: userId, phoneNumber: { $in: chatJids } }).select('phoneNumber name');
         const contactMap = contacts.reduce((map, contact) => {
@@ -202,20 +216,18 @@ const getChats = async (req, res) => {
             return map;
         }, {});
 
-        // 3. Gabungkan data agregat dengan nama kenalan
         const chats = latestMessages.map(chat => ({
             jid: chat._id,
-            name: contactMap[chat._id] || chat._id.split('@')[0], // Guna nama jika ada, jika tidak guna nombor
+            name: contactMap[chat._id] || chat._id.split('@')[0],
             lastMessageTimestamp: chat.lastMessageTimestamp,
             lastMessageBody: chat.lastMessageBody,
             lastMessageFromMe: chat.lastMessageFromMe
-            // Tambah field lain seperti unread count jika logik ditambah
         }));
 
         res.json(chats);
 
     } catch (error) {
-        console.error(`Error fetching chats for user ${userId}:`, error);
+        console.error(`Error fetching chats for user ${userId}, device ${deviceId}:`, error);
         res.status(500).json({ message: 'Server error fetching chats.' });
     }
 };

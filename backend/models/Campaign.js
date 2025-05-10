@@ -18,6 +18,11 @@ const campaignSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Campaign name is required']
   },
+  campaignType: {
+    type: String,
+    enum: ['bulk', 'ai_chatbot'],
+    default: 'ai_chatbot'
+  },
   statusEnabled: {
     type: Boolean,
     default: true
@@ -53,6 +58,14 @@ const campaignSchema = new mongoose.Schema({
     type: String,
     enum: ['typing', 'recording', 'none'],
     default: 'typing'
+  },
+  sentCount: {
+    type: Number,
+    default: 0
+  },
+  failedCount: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true
@@ -60,5 +73,6 @@ const campaignSchema = new mongoose.Schema({
 
 // Indexing
 campaignSchema.index({ userId: 1, deviceId: 1 });
+campaignSchema.index({ userId: 1, campaignType: 1 });
 
 module.exports = mongoose.model('Campaign', campaignSchema); 
