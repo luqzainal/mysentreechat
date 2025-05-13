@@ -1,7 +1,7 @@
 const Contact = require('../models/Contact.js');
 const Message = require('../models/Message.js');
 const Campaign = require('../models/Campaign.js');
-const { getWhatsAppSocket, sendMessage: sendWhatsappMessageViaService } = require('../services/whatsappService.js');
+const { getWhatsAppSocket, destroyClientByUserId, connectToWhatsApp } = require('../services/baileysService.js');
 const { processSpintax } = require('../utils/spintaxUtils.js');
 
 // Fungsi helper untuk format nombor ke JID WhatsApp

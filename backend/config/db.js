@@ -15,6 +15,13 @@ const connectDB = async () => {
     });
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+
+    // Daftarkan model selepas sambungan berjaya - DIKELUARKAN
+    // require('../models/whatsappDevice.js'); 
+    // Tambah require untuk model lain di sini jika perlu
+    // require('../models/user.js');
+    // require('../models/contact.js');
+
   } catch (error) {
     console.error(`Error connecting to MongoDB: ${error.message}`);
     // Exit process with failure

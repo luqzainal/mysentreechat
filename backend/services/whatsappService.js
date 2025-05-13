@@ -1,5 +1,6 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal'); // Untuk debug QR di terminal
+const fs = require('fs-extra'); // Import fs-extra
 // Tukar import kepada require dan tambah .js
 const WhatsappDevice = require('../models/WhatsappDevice.js');
 
@@ -34,6 +35,9 @@ const PLAN_LIMITS = {
 const clients = new Map(); // Map<userId, Client>
 let globalIO = null; // Simpan instance IO global
 
+// Fungsi utiliti untuk kelewatan
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 // Fungsi untuk menghantar mesej teks
 async function sendMessage(userId, jid, text) {
     const client = clients.get(userId); // Dapatkan client spesifik untuk user
@@ -56,19 +60,20 @@ async function sendMessage(userId, jid, text) {
 
 // Fungsi untuk menyambung ke WhatsApp
 async function connectToWhatsApp(userId) {
-    if (clients.has(userId)) {
-        console.log(`Client untuk user ${userId} sudah wujud atau sedang cuba bersambung.`);
-        // Mungkin hantar status semasa jika perlu
-        try {
-           const state = await clients.get(userId).getState();
-           if(globalIO) globalIO.to(userId).emit('whatsapp_status', state || 'connecting');
-        } catch (e) {
-           console.warn(`Gagal dapatkan state client sedia ada untuk user ${userId}: ${e.message}`);
-        }
-        return; // Jangan cipta client baru jika sudah ada
-    }
+    // DIKELUARKAN: Pemeriksaan klien sedia ada yang menghalang sambungan baru
+    // if (clients.has(userId)) {
+    //     console.log(`Client untuk user ${userId} sudah wujud atau sedang cuba bersambung.`);
+    //     // Mungkin hantar status semasa jika perlu
+    //     try {
+    //        const state = await clients.get(userId).getState();
+    //        if(globalIO) globalIO.to(userId).emit('whatsapp_status', state || 'connecting');
+    //     } catch (e) {
+    //        console.warn(`Gagal dapatkan state client sedia ada untuk user ${userId}: ${e.message}`);
+    //     }
+    //     return; // Jangan cipta client baru jika sudah ada
+    // }
 
-    // --- SEMAKAN HAD SAMBUNGAN ---
+    // --- SEMAKAN HAD SAMBUNGAN (berdasarkan WhatsappDevice) ---
     try {
         const user = await User.findById(userId);
         if (!user) {
@@ -80,31 +85,64 @@ async function connectToWhatsApp(userId) {
         const plan = user.membershipPlan || 'Free';
         const limit = PLAN_LIMITS[plan] || PLAN_LIMITS['default'];
 
-        // Kira sambungan yang statusnya 'connected'
-        const currentConnectionCount = await WhatsappConnection.countDocuments({ userId, status: 'connected' });
+        // Kira sambungan yang statusnya 'connected' dalam WhatsappDevice
+        const currentActiveDevices = await WhatsappDevice.countDocuments({ userId, connectionStatus: 'connected' });
 
-        console.log(`Pelan pengguna ${userId}: ${plan}, Had: ${limit}, Sambungan aktif: ${currentConnectionCount}`);
+        console.log(`Pelan pengguna ${userId}: ${plan}, Had: ${limit}, Peranti aktif semasa (WhatsappDevice): ${currentActiveDevices}`);
 
-        if (currentConnectionCount >= limit) {
-            console.warn(`Had sambungan (${limit}) untuk pengguna ${userId} telah dicapai.`);
+        if (currentActiveDevices >= limit) {
+            console.warn(`Had sambungan peranti (${limit}) untuk pengguna ${userId} (pelan ${plan}) telah dicapai.`);
             if (globalIO) {
                 globalIO.to(userId).emit('whatsapp_status', 'limit_reached');
-                globalIO.to(userId).emit('error_message', `Had sambungan (${limit}) untuk pelan ${plan} anda telah dicapai.`);
+                globalIO.to(userId).emit('error_message', `Had sambungan peranti (${limit}) untuk pelan ${plan} anda telah dicapai.`);
             }
-            // Kemaskini rekod yang mungkin dalam status connecting/waiting_qr ke limit_reached
-            await WhatsappConnection.updateMany({ userId, status: { $in: ['connecting', 'waiting_qr'] } }, { status: 'limit_reached' });
             return; // Hentikan proses sambungan
         }
 
+        // Jika ada client lama untuk userId ini, musnahkan dahulu
+        if (clients.has(userId)) {
+            console.log(`Memusnahkan client sedia ada untuk user ${userId} sebelum memulakan sesi QR baru.`);
+            await destroyClientByUserId(userId, false); 
+        }
+
+        // === PEMBERSIHAN SESI LEBIH AGRESIF ===
+        const sessionPath = path.join(__dirname, 'sessions', userId);
+        const oldSessionPath = path.join(__dirname, 'sessions', `${userId}_${Date.now()}_old`); // Tambah timestamp unik
+        try {
+            if (await fs.pathExists(sessionPath)) { // Semak jika folder wujud
+                console.log(`[${userId}] Cuba tukar nama folder sesi: ${sessionPath} -> ${oldSessionPath}`);
+                await fs.rename(sessionPath, oldSessionPath);
+                console.log(`[${userId}] Berjaya tukar nama folder sesi.`);
+                console.log(`[${userId}] Cuba padam folder sesi lama (dinamakan semula): ${oldSessionPath}`);
+                await fs.remove(oldSessionPath);
+                console.log(`[${userId}] Folder sesi lama (dinamakan semula) berjaya dipadam.`);
+            } else {
+                console.log(`[${userId}] Folder sesi ${sessionPath} tidak wujud, tidak perlu padam.`);
+            }
+             // Tambah kelewatan kecil
+             const cleanupDelay = 200; // 200ms
+             console.log(`[${userId}] Menunggu ${cleanupDelay}ms selepas pembersihan sesi...`);
+             await delay(cleanupDelay);
+             console.log(`[${userId}] Kelewatan selesai.`);
+
+        } catch (err) {
+            console.error(`[${userId}] Ralat semasa pembersihan sesi agresif (rename/delete/delay):`, err);
+            // Mungkin tidak kritikal jika folder sudah tiada, teruskan?
+            // Jika ralat serius, mungkin patut berhenti?
+             if (globalIO) globalIO.to(userId).emit('error_message', 'Ralat semasa persediaan sesi baru.');
+             return; // Hentikan jika pembersihan gagal teruk
+        }
+        // === AKHIR PEMBERSIHAN AGRESIF ===
+
     } catch (dbError) {
-         console.error("Ralat DB semasa menyemak had sambungan:", dbError);
-         if (globalIO) globalIO.to(userId).emit('error_message', 'Ralat pelayan semasa menyemak had sambungan.');
+         console.error("Ralat DB semasa menyemak had sambungan atau memusnahkan klien lama:", dbError);
+         if (globalIO) globalIO.to(userId).emit('error_message', 'Ralat pelayan semasa persediaan sambungan.');
          return;
     }
     // --- AKHIR SEMAKAN HAD ---
 
-    console.log(`Memulakan sambungan WhatsApp untuk pengguna: ${userId}...`);
-    // Kemaskini status ke 'connecting' dalam DB
+    console.log(`Memulakan sambungan WhatsApp BARU untuk pengguna: ${userId}...`);
+    // Kemaskini status ke 'connecting' dalam DB (WhatsappConnection mungkin boleh dipertimbangkan untuk dibuang jika WhatsappDevice memadai)
     try {
         await WhatsappConnection.findOneAndUpdate(
              // Cari rekod yang sesuai untuk disambungkan (atau cipta baru jika tiada)
@@ -408,12 +446,24 @@ async function connectToWhatsApp(userId) {
          }
          
          try {
+            // Kemaskini WhatsappConnection
             console.log(`[whatsappService] Updating WhatsappConnection status to disconnected for user ${localUserId}`);
             await WhatsappConnection.updateOne(
                 { userId: localUserId, status: 'connected' }, 
                 { status: 'disconnected', qrCode: null }
             );
             console.log(`[whatsappService] WhatsappConnection status updated for user ${localUserId}`);
+
+            // === TAMBAHAN: Kemaskini juga WhatsappDevice ===
+            console.log(`[whatsappService] Updating WhatsappDevice status to disconnected for user ${localUserId}`);
+            // Andaikan hanya ada satu peranti aktif per clientId LocalAuth pada satu masa
+            await WhatsappDevice.updateMany(
+                { userId: localUserId, connectionStatus: 'connected' }, 
+                { connectionStatus: 'disconnected' }
+            );
+            console.log(`[whatsappService] WhatsappDevice status updated for user ${localUserId}`);
+            // === AKHIR TAMBAHAN ===
+
          } catch (dbError) {
              console.error(`[whatsappService] DB error updating status to disconnected for user ${localUserId}:`, dbError);
          }
@@ -604,7 +654,7 @@ function getWhatsAppSocket(userId) {
 }
 
 // BARU: Fungsi untuk mematikan dan membersihkan client WhatsApp spesifik by userId
-async function destroyClientByUserId(userId) {
+async function destroyClientByUserId(userId, sendDisconnectMessage = true) {
   const client = clients.get(userId);
   
   if (client) {
@@ -644,17 +694,24 @@ async function destroyClientByUserId(userId) {
     console.log(`[whatsappService] No active client found for user ${userId} to destroy.`);
   }
 
-  // Kemaskini status DB dan frontend (ini sepatutnya juga berlaku dalam event 'disconnected' atau jika client tiada)
+  // Kemaskini status DB dan frontend (Gabungkan logik kemaskini DB di sini)
   try {
+    // Kemaskini WhatsappConnection
     await WhatsappConnection.updateOne(
         { userId: userId, status: { $ne: 'disconnected' } }, 
         { status: 'disconnected', qrCode: null }
     );
-    if(globalIO) {
+    // Kemaskini WhatsappDevice
+    await WhatsappDevice.updateMany(
+        { userId: userId, connectionStatus: { $ne: 'disconnected' } }, 
+        { connectionStatus: 'disconnected' }
+    );
+    
+    if(globalIO && sendDisconnectMessage) { // Hanya hantar mesej jika dibenarkan
         globalIO.to(userId).emit('whatsapp_status', 'disconnected');
         globalIO.to(userId).emit('whatsapp_qr', null);
     }
-    console.log(`[whatsappService] Ensured DB and frontend status is 'disconnected' for user ${userId} in destroyClientByUserId.`);
+    console.log(`[whatsappService] Ensured DB (Connection & Device) and frontend status is 'disconnected' for user ${userId} in destroyClientByUserId.`);
   } catch (dbErr) { 
       console.error(`[whatsappService] DB error during final disconnect update for ${userId} in destroyClientByUserId:`, dbErr); 
   }
@@ -674,16 +731,24 @@ async function cleanupWhatsAppClients() {
     console.log("Semua client WhatsApp telah dibersihkan.");
 }
 
-// Pastikan cleanup dijalankan semasa server berhenti
-process.on('SIGINT', cleanupWhatsAppClients);
-process.on('SIGTERM', cleanupWhatsAppClients);
-
-// Gantikan export ES Module dengan module.exports
+// Export fungsi yang diperlukan (jika masih ada yang import fail ini? Sebaiknya tiada)
 module.exports = {
-  sendMessage,
-  connectToWhatsApp,
-  initializeWhatsAppService,
-  getWhatsAppSocket,
-  destroyClientByUserId,
-  cleanupWhatsAppClients
-}; 
+    sendMessage,
+    connectToWhatsApp,
+    initializeWhatsAppService,
+    getWhatsAppSocket,
+    destroyClientByUserId,
+    cleanupWhatsAppClients
+};
+
+// =======================================
+// PENDAFTARAN SHUTDOWN HOOK (DIKOMEN KELUAR)
+// process.on('SIGINT', cleanupWhatsAppClients);
+// process.on('SIGTERM', cleanupWhatsAppClients);
+// =======================================
+
+// Contoh memanggil cleanup jika fail ini dijalankan secara langsung (mungkin tidak relevan)
+if (require.main === module) {
+    console.log("Menjalankan cleanup secara manual...");
+    // cleanupWhatsAppClients();
+} 

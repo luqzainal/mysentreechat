@@ -8,37 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from 'sonner';
 import api from '../services/api';
 
-// Contoh data kempen (gantikan dengan API)
-const dummyCampaigns = [
-  {
-    id: 'camp1',
-    name: 'Welcome Message',
-    status: 'Enabled',
-    useAI: true,
-    media: true,
-    link: false,
-    lastEdited: '2024-03-10',
-  },
-  {
-    id: 'camp2',
-    name: 'Raya Promotion',
-    status: 'Disabled',
-    useAI: false,
-    media: true,
-    link: true,
-    lastEdited: '2024-03-15',
-  },
-    {
-    id: 'camp3',
-    name: 'Follow Up Reminder',
-    status: 'Enabled',
-    useAI: true,
-    media: false,
-    link: false,
-    lastEdited: '2024-03-18',
-  },
-];
-
 function CampaignListPage() {
   const { numberId } = useParams();
   const [campaigns, setCampaigns] = useState([]);
@@ -49,11 +18,14 @@ function CampaignListPage() {
   useEffect(() => {
     const fetchCampaigns = async () => {
       setIsLoading(true);
-      // TODO: Ganti dengan API call sebenar
-      /*
+      // Guna API call sebenar
       try {
-          const response = await api.get(`/ai-chatbot/${numberId}/campaigns`);
-          setCampaigns(response.data);
+          // Pastikan ID yang digunakan adalah yang betul. Anda mungkin perlu `whatsappDeviceId` atau `_id` dari backend
+          const response = await api.get(`/api/ai-chatbot/${numberId}/campaigns`); 
+          // Jika backend mengembalikan array terus:
+          setCampaigns(response.data || []);
+          // Jika backend mengembalikan objek dengan property, cth: { campaigns: [...] }
+          // setCampaigns(response.data.campaigns || []); 
       } catch (error) {
           console.error(`Failed to fetch campaigns for ${numberId}:`, error);
           toast.error("Failed to load campaigns.");
@@ -61,11 +33,6 @@ function CampaignListPage() {
       } finally {
           setIsLoading(false);
       }
-      */
-      // Simulasi
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setCampaigns(dummyCampaigns);
-      setIsLoading(false);
     };
 
     fetchCampaigns();
@@ -76,10 +43,12 @@ function CampaignListPage() {
       const newStatus = currentStatus === 'Enabled' ? 'Disabled' : 'Enabled';
       setIsUpdating(campaignId);
       toast.info(`Updating status for campaign ${campaignId}...`);
-      /*
+      // Guna API call sebenar
       try {
-          const response = await api.put(`/ai-chatbot/${numberId}/campaigns/${campaignId}/status`, { status: newStatus });
-          setCampaigns(prev => prev.map(c => c.id === campaignId ? { ...c, status: response.data.status } : c));
+          // Pastikan ID kempen yang dihantar adalah _id atau ID yang dijangka backend
+          const response = await api.put(`/api/ai-chatbot/${numberId}/campaigns/${campaignId}/status`, { status: newStatus });
+          // Pastikan anda mengemas kini state berdasarkan ID yang betul (_id?)
+          setCampaigns(prev => prev.map(c => c._id === campaignId ? { ...c, status: response.data.status } : c));
           toast.success("Campaign status updated.");
       } catch (error) {
            console.error("Failed to update campaign status:", error);
@@ -87,12 +56,6 @@ function CampaignListPage() {
       } finally {
            setIsUpdating(null);
       }
-      */
-      // Simulasi
-      await new Promise(resolve => setTimeout(resolve, 600));
-      setCampaigns(prev => prev.map(c => c.id === campaignId ? { ...c, status: newStatus } : c));
-      toast.success("Campaign status updated (Simulation).");
-      setIsUpdating(null);
   };
 
   // TODO: Fungsi untuk padam kempen
@@ -100,10 +63,12 @@ function CampaignListPage() {
        if (!window.confirm("Are you sure you want to delete this campaign?")) return;
        setIsUpdating(campaignId);
        toast.info(`Deleting campaign ${campaignId}...`);
-       /*
+       // Guna API call sebenar
        try {
-           await api.delete(`/ai-chatbot/${numberId}/campaigns/${campaignId}`);
-           setCampaigns(prev => prev.filter(c => c.id !== campaignId));
+           // Pastikan ID kempen yang dihantar adalah _id atau ID yang dijangka backend
+           await api.delete(`/api/ai-chatbot/${numberId}/campaigns/${campaignId}`);
+           // Pastikan anda menapis state berdasarkan ID yang betul (_id?)
+           setCampaigns(prev => prev.filter(c => c._id !== campaignId));
            toast.success("Campaign deleted successfully.");
        } catch (error) {
            console.error("Failed to delete campaign:", error);
@@ -111,12 +76,6 @@ function CampaignListPage() {
        } finally {
            setIsUpdating(null);
        }
-       */
-       // Simulasi
-       await new Promise(resolve => setTimeout(resolve, 600));
-       setCampaigns(prev => prev.filter(c => c.id !== campaignId));
-       toast.success("Campaign deleted (Simulation).");
-       setIsUpdating(null);
    };
 
   if (isLoading) {
@@ -161,7 +120,7 @@ function CampaignListPage() {
                   </TableHeader>
                   <TableBody>
                     {campaigns.map((campaign) => (
-                      <TableRow key={campaign.id} className={isUpdating === campaign.id ? 'opacity-50' : ''}>
+                      <TableRow key={campaign._id} className={isUpdating === campaign._id ? 'opacity-50' : ''}>
                         <TableCell className="font-medium">{campaign.name}</TableCell>
                         <TableCell>
                            <Badge variant={campaign.status === 'Enabled' ? 'success' : 'destructive'}>
@@ -176,9 +135,9 @@ function CampaignListPage() {
                         <TableCell>{campaign.lastEdited}</TableCell>
                         <TableCell className="text-right space-x-1">
                            {/* View/Edit Button */}
-                          <Button variant="ghost" size="icon" asChild disabled={isUpdating === campaign.id}>
-                              {/* TODO: Nanti pautan edit perlu ke /ai-chatbot/:numberId/campaigns/:campaignId/edit */}
-                              <Link to={`#edit-${campaign.id}`} title="Edit Campaign">
+                          <Button variant="ghost" size="icon" asChild disabled={isUpdating === campaign._id}>
+                              {/* Pautan edit perlu ke /ai-chatbot/:numberId/campaigns/:campaignId/edit */}
+                              <Link to={`/ai-chatbot/${numberId}/campaigns/${campaign._id}/edit`} title="Edit Campaign">
                                  <Edit className="h-4 w-4" />
                              </Link>
                           </Button>
@@ -186,8 +145,8 @@ function CampaignListPage() {
                            <Button
                                variant="ghost"
                                size="icon"
-                               onClick={() => handleToggleStatus(campaign.id, campaign.status)}
-                               disabled={isUpdating === campaign.id}
+                               onClick={() => handleToggleStatus(campaign._id, campaign.status)}
+                               disabled={isUpdating === campaign._id}
                                title={campaign.status === 'Enabled' ? 'Disable Campaign' : 'Enable Campaign'}
                             >
                               {campaign.status === 'Enabled' ? <ToggleRight className="h-4 w-4 text-green-600" /> : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
@@ -197,8 +156,8 @@ function CampaignListPage() {
                                variant="ghost"
                                size="icon"
                                className="text-destructive hover:bg-destructive/10"
-                               onClick={() => handleDeleteCampaign(campaign.id)}
-                               disabled={isUpdating === campaign.id}
+                               onClick={() => handleDeleteCampaign(campaign._id)}
+                               disabled={isUpdating === campaign._id}
                                title="Delete Campaign"
                             >
                                <Trash2 className="h-4 w-4" />

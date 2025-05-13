@@ -93,26 +93,62 @@ function ChatPage() {
 
         socket.current.on('connect', () => console.log('Socket connected for chat:', socket.current.id));
         socket.current.on('new_whatsapp_message', (messageData) => {
-            console.log('New message via socket:', messageData);
+            console.log('[ChatPage Socket] Raw messageData received:', JSON.stringify(messageData)); // Log data mentah
+            console.log(`[ChatPage Socket] Current selectedDeviceId state: ${selectedDeviceId}`); // Log state deviceId
+            console.log(`[ChatPage Socket] messageData.sourceDeviceId: ${messageData.sourceDeviceId}`); // Log sourceDeviceId dari data
+
+            // Periksa penapis deviceId
             if (messageData.sourceDeviceId !== selectedDeviceId) {
-                console.log(`Message from different device (${messageData.sourceDeviceId}), ignoring for current view (${selectedDeviceId})`);
-                return;
+                console.log(`[ChatPage Socket] Filtering out message: sourceDeviceId (${messageData.sourceDeviceId}) !== selectedDeviceId (${selectedDeviceId})`);
+                return; // Jangan proses mesej ini
+            }
+            console.log(`[ChatPage Socket] Device ID matches. Processing message...`); // Log jika ID sepadan
+
+            const chatJid = messageData.fromMe ? messageData.to : messageData.from; // Betulkan: Guna 'to' jika fromMe, 'from' jika tidak
+            console.log(`[ChatPage Socket] Determined chatJid: ${chatJid}, Current selectedChatJid: ${selectedChatJid}`); // Log JID
+
+            if (chatJid === selectedChatJid) {
+                console.log(`[ChatPage Socket] Updating messages for selected chat (${chatJid})`);
+                setCurrentChatMessages((prevMessages) => [...prevMessages, messageData]);
+            } else {
+                console.log(`[ChatPage Socket] Message is for a different chat (${chatJid}). Not updating current messages.`);
             }
 
-            const chatJid = messageData.fromMe ? messageData.receiver : messageData.sender;
-            if (chatJid === selectedChatJid) {
-                setCurrentChatMessages((prevMessages) => [...prevMessages, messageData]);
-            }
+            // Kemas kini senarai chat
+            console.log(`[ChatPage Socket] Updating chats list...`);
             setChats(prevChats => {
                 const chatIndex = prevChats.findIndex(c => c.jid === chatJid);
                 let updatedChat;
                 const otherChats = prevChats.filter(c => c.jid !== chatJid);
                 if (chatIndex > -1) {
-                    updatedChat = { ...prevChats[chatIndex], lastMessageBody: messageData.body, lastMessageTimestamp: messageData.timestamp, lastMessageFromMe: messageData.fromMe };
+                    console.log(`[ChatPage Socket] Updating existing chat in list: ${chatJid}`);
+                    updatedChat = { 
+                        ...prevChats[chatIndex], 
+                        lastMessageBody: messageData.body, 
+                        lastMessageTimestamp: messageData.timestamp, 
+                        lastMessageFromMe: messageData.fromMe 
+                    };
                 } else {
-                    updatedChat = { jid: chatJid, name: messageData.senderName || chatJid.split('@')[0], lastMessageBody: messageData.body, lastMessageTimestamp: messageData.timestamp, lastMessageFromMe: messageData.fromMe };
+                    console.log(`[ChatPage Socket] Adding new chat to list: ${chatJid}`);
+                    // Cuba dapatkan nama dari messageData jika ada (cth: pushName dari sender)
+                    const senderName = messageData.rawData ? JSON.parse(messageData.rawData)?.pushName : null; 
+                    updatedChat = { 
+                        jid: chatJid, 
+                        name: senderName || chatJid.split('@')[0], 
+                        lastMessageBody: messageData.body, 
+                        lastMessageTimestamp: messageData.timestamp, 
+                        lastMessageFromMe: messageData.fromMe 
+                    };
                 }
-                return [updatedChat, ...otherChats].sort((a, b) => new Date(b.lastMessageTimestamp) - new Date(a.lastMessageTimestamp));
+                // Susun semula
+                const sortedChats = [updatedChat, ...otherChats].sort((a, b) => {
+                    // Handle potentially invalid dates
+                    const dateA = new Date(a.lastMessageTimestamp).getTime();
+                    const dateB = new Date(b.lastMessageTimestamp).getTime();
+                    return (isNaN(dateB) ? 0 : dateB) - (isNaN(dateA) ? 0 : dateA);
+                });
+                console.log(`[ChatPage Socket] Chats list updated.`);
+                return sortedChats;
             });
         });
         socket.current.on('disconnect', (reason) => console.log('Socket disconnected:', reason));

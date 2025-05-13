@@ -15,9 +15,16 @@ const contactRoutes = require('./routes/contactRoutes.js');
 const autoresponderRoutes = require('./routes/autoresponderRoutes.js'); 
 const mediaRoutes = require('./routes/mediaRoutes.js');
 const aiChatbotRoutes = require('./routes/aiChatbotRoutes.js');
-const { initializeWhatsAppService, getWhatsAppSocket, connectToWhatsApp, destroyClientByUserId } = require('./services/whatsappService.js');
+const { initializeWhatsAppService,
+        getWhatsAppSocket,
+        connectToWhatsApp,
+        destroyClientByUserId } = require('./services/baileysService.js');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware.js');
-const WhatsappDevice = require('./models/whatsappDevice.js');
+const mongoose = require('mongoose');
+const User = require('./models/User');
+const WhatsappDevice = require('./models/WhatsappDevice');
+// const baileysService = require('./services/baileysService.js'); // Import ini tidak diperlukan kerana kita guna destructuring di atas
+// const { verifyToken } = require('./utils/authUtils.js'); // Fail tidak wujud
 
 dotenv.config();
 
@@ -116,6 +123,21 @@ io.on('connection', (socket) => {
             console.warn(`User ID mismatch on connect request: Socket Query=${userId}, Request Param=${requestingUserId}`);
             return socket.emit('error_message', 'User authentication mismatch.');
        }
+       
+       // Semak jika klien sudah wujud
+       const existingClient = getWhatsAppSocket(userId); // Guna fungsi dari Baileys service
+       if (existingClient) {
+           console.log(`[Server] Client exists for user ${userId}. Attempting to destroy it before starting new session...`);
+           try {
+               await destroyClientByUserId(userId); // Cuba musnahkan yang lama dahulu
+               console.log(`[Server] Existing client destroyed for user ${userId}. Proceeding with new connection.`);
+           } catch (destroyError) {
+               console.error(`[Server] Failed to destroy existing client for user ${userId}:`, destroyError);
+               // Mungkin mahu hantar ralat ke frontend?
+               // Teruskan juga? Mungkin klien sudah mati.
+           }
+       }
+       
        console.log(`Forwarding connect request to whatsappService for user ${userId}`);
        await startWhatsAppSession(userId);
   });
@@ -148,38 +170,35 @@ io.on('connection', (socket) => {
 
 // Fungsi helper untuk mendapatkan status client
 const getClientStatus = async (userId) => {
-    const client = getWhatsAppSocket(userId);
+    const client = getWhatsAppSocket(userId); // Dapatkan client dari Baileys service
     if (client) {
-        console.log(`[server.cjs] getClientStatus: Client found in Map for user ${userId}. Getting state from client...`);
-        try {
-            const state = await client.getState();
-            console.log(`[server.cjs] getClientStatus: State from client.getState() for user ${userId} is '${state}'`);
-            return state;
-        } catch (error) {
-            console.error(`[server.cjs] getClientStatus: Error getting client state for user ${userId}:`, error);
-            // Jika client.getState() gagal, mungkin client dalam keadaan tidak baik.
-            // Kita boleh anggap disconnected dan cuba bersihkan client ini.
-            console.log(`[server.cjs] getClientStatus: Attempting to cleanup problematic client for user ${userId} due to getState error.`);
-            // Panggil fungsi pembersihan dari whatsappService jika ada, atau implementasi di sini.
-            // Contoh: destroyClientByUserId(userId); // Perlu import jika mahu guna di sini.
-            return 'disconnected'; // Kembalikan disconnected jika getState gagal
-        }
+        // Jika client wujud dalam memori Baileys, kita anggap ia 'connected' 
+        // Kerana Baileys akan membuangnya dari memori jika ia putus atau tidak dapat disambung semula.
+        // Baileys tidak mempunyai fungsi getState() seperti whatsapp-web.js
+        console.log(`[server.cjs] getClientStatus: Client found in Baileys Map for user ${userId}. Assuming 'connected'.`);
+        return 'connected'; 
     } else {
-        console.log(`[server.cjs] getClientStatus: Client NOT found in Map for user ${userId}. Checking DB for last known status...`);
-        // Sebagai fallback, cuba dapatkan status terakhir dari DB jika client tiada dalam memori
+        console.log(`[server.cjs] getClientStatus: Client NOT found in Baileys Map for user ${userId}. Checking DB for last known status...`);
         try {
-            // Andaikan kita semak WhatsappDevice atau WhatsappConnection
-            const device = await WhatsappDevice.findOne({ userId: userId }).sort({ lastConnectedAt: -1 }); // Atau model & field status yang sesuai
-            if (device && device.connectionStatus) {
-                console.log(`[server.cjs] getClientStatus: Status from DB for user ${userId} is '${device.connectionStatus}'`);
-                return device.connectionStatus;
+            const device = await WhatsappDevice.findOne({ userId: userId, connectionStatus: 'connected' }); 
+            if (device) {
+                console.log(`[server.cjs] getClientStatus: Active device found in DB for user ${userId} with status '${device.connectionStatus}'. Returning it.`);
+                return device.connectionStatus; // Kembalikan status dari DB (sepatutnya connected)
             }
-            console.log(`[server.cjs] getClientStatus: No device record or status in DB for user ${userId}. Returning 'disconnected'.`);
+            // Jika tiada peranti yang aktif bersambung dalam DB, cari yang paling baru dikemas kini
+            const lastKnownDevice = await WhatsappDevice.findOne({ userId: userId }).sort({ updatedAt: -1 });
+            if (lastKnownDevice) {
+                console.log(`[server.cjs] getClientStatus: Last known device status from DB for user ${userId} is '${lastKnownDevice.connectionStatus}'.`);
+                return lastKnownDevice.connectionStatus;
+            }
+            console.log(`[server.cjs] getClientStatus: No device record found in DB for user ${userId}. Returning 'disconnected'.`);
         } catch (dbError) {
             console.error(`[server.cjs] getClientStatus: DB error fetching status for user ${userId}:`, dbError);
         }
     }
-    return 'disconnected'; // Default jika tiada client dan tiada info DB
+    // Default jika tiada client dalam memori dan tiada info meyakinkan dari DB
+    console.log(`[server.cjs] getClientStatus: Fallback, returning 'disconnected' for user ${userId}.`);
+    return 'disconnected'; 
 };
 
 // Fungsi helper untuk memulakan sesi WhatsApp
@@ -196,4 +215,31 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Pelayan (termasuk WebSocket) berjalan pada port ${PORT}`));
 
 // Export io untuk digunakan di tempat lain
-module.exports = { io }; 
+module.exports = { io };
+
+// Tangani penutupan yang betul (graceful shutdown)
+const gracefulShutdown = async (signal) => {
+    console.log(`\n${signal} diterima. Memulakan graceful shutdown...`);
+
+    // 1. Hentikan server HTTP daripada menerima sambungan baru
+    server.close(async () => {
+        console.log('Server HTTP ditutup.');
+
+        // 2. Tutup sambungan Socket.IO
+        io.close(() => {
+            console.log('Sambungan Socket.IO ditutup.');
+        });
+
+        // 3. Bersihkan client WhatsApp (Gunakan Baileys)
+        try {
+            // await whatsappService.cleanupWhatsAppClients(); // Panggil servis lama
+            await baileysService.cleanupWhatsAppClients(); // Panggil servis Baileys
+            console.log('Client WhatsApp (Baileys) telah dibersihkan.');
+        } catch (cleanupError) {
+            console.error('Ralat semasa membersihkan client WhatsApp (Baileys):', cleanupError);
+        }
+
+        // 4. Tutup sambungan MongoDB
+        // ... existing code ...
+    });
+}; 

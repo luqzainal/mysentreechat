@@ -240,30 +240,42 @@ function ScanDevicePage() {
              </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center space-y-4">
+              {/* PAPARKAN QR JIKA DALAM PROSES MENUNGGU SCAN */}
               {connectionStatus === 'waiting_qr' && rawQrString && (
                  <div className="p-4 bg-white rounded-lg shadow-inner border">
                      <QRCode value={rawQrString} size={250} />
                  </div>
               )}
-              {(connectionStatus === 'disconnected' || connectionStatus === 'User not loaded') && (
+
+              {/* PAPARKAN BUTANG GENERATE JIKA BELUM SAMPAI HAD & TIDAK SEDANG CONNECTING/WAITING */}
+              { connectionStatus !== 'Connecting...' && connectionStatus !== 'waiting_qr' &&
+                connectedDevices.filter(d => d.connectionStatus === 'connected').length < limitForCurrentPlan && (
                   <Button onClick={handleConnectRequest} disabled={!socketConnected || !user?._id}>
-                      <QrCodeIcon className="mr-2 h-4 w-4" /> Generate QR Code
+                      <QrCodeIcon className="mr-2 h-4 w-4" /> Connect Another Device
                   </Button>
               )}
-              {connectionStatus === 'connected' && (
-                  <div className="text-center text-green-600">
-                      <p>A device is currently connected.</p>
-                      <Button variant="destructive" size="sm" onClick={() => handleDisconnectRequest()} className="mt-2">
-                          <Power className="mr-2 h-4 w-4" /> Disconnect Current Session
-                      </Button>
-                  </div>
-              )}
+
+              {/* Tunjukkan mesej connecting */}
               {connectionStatus === 'Connecting...' && (
                   <p className="text-muted-foreground">Connecting, please wait...</p>
               )}
+
+              {/* Tunjukkan jika had dicapai */}
+              { connectedDevices.filter(d => d.connectionStatus === 'connected').length >= limitForCurrentPlan &&
+                connectionStatus !== 'waiting_qr' && connectionStatus !== 'Connecting...' && (
+                 <p className="text-sm text-yellow-600">Connection limit reached for your plan.</p>
+              )}
+
+              {/* Mesej jika socket tiada */}
                {!socketConnected && connectionStatus !== 'User not loaded' && (
                     <p className="text-xs text-red-500">Connection to server lost. Please reload the page.</p>
                )}
+
+               {/* DIKELUARKAN: Mesej "A device is currently connected." dan butang disconnect session QR, 
+                   kerana kita kini mengurus peranti individu dalam senarai di bawah. 
+               */}
+              {/* {connectionStatus === 'connected' && ( ... ) } */}
+
           </CardContent>
       </Card>
 
