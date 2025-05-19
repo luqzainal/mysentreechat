@@ -94,7 +94,7 @@ function CampaignListPage() {
              <p className="text-muted-foreground">Manage campaigns for number ID: {numberId}</p>
          </div>
         <Button asChild>
-            <Link to={`/ai-chatbot/${numberId}/campaigns/create`}>
+            <Link to={`/ai-chatbot/${numberId}/campaigns/create?type=ai_chatbot`}>
                 <PlusCircle className="mr-2 h-4 w-4" /> Add New Campaign
             </Link>
         </Button>

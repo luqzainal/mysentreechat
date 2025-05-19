@@ -98,7 +98,7 @@ const MediaStoragePage = () => {
     setUploadProgress(0);
 
     try {
-      const response = await api.post('/media/upload', formData, {
+      const response = await api.post('/media', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -108,7 +108,6 @@ const MediaStoragePage = () => {
         },
       });
       
-      // Add new media to the list (without re-fetching everything)
       setMediaList(prevList => [response.data, ...prevList]);
       toast.success(`File ${response.data.originalName} uploaded successfully.`);
       setSelectedFile(null); // Reset file selection

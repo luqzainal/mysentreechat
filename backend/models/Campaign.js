@@ -34,17 +34,23 @@ const campaignSchema = new mongoose.Schema({
   urlLink: {
     type: String
   },
-  // Simpan path ke fail media yang diupload, bukan fail itu sendiri
-  mediaPath: {
-    type: String,
-    required: false
-  },
-  // Simpan original name dan mime type jika perlu
-  mediaOriginalName: { type: String },
-  mediaMimeType: { type: String },
+  // Field media tunggal dibuang
+  // mediaPath: {
+  //   type: String,
+  //   required: false
+  // },
+  // mediaOriginalName: { type: String },
+  // mediaMimeType: { type: String },
+
+  // BARU: Untuk pelbagai lampiran media dari Media Library
+  mediaAttachments: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Media'
+  }],
+
   caption: {
     type: String,
-    required: false
+    required: false // Boleh jadi mesej sahaja tanpa kapsyen jika tiada media
   },
   aiAgentTraining: {
     type: String,
@@ -66,6 +72,38 @@ const campaignSchema = new mongoose.Schema({
   failedCount: {
     type: Number,
     default: 0
+  },
+  // BARU: Untuk kempen pukal, simpan ID kumpulan kenalan yang digunakan
+  contactGroupId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ContactGroup',
+    required: function() { // Hanya diperlukan jika campaignType adalah 'bulk'
+        return this.campaignType === 'bulk';
+    }
+  },
+  // BARU: Untuk penjadualan kempen pukal
+  scheduledAt: {
+    type: Date,
+    required: false // Tidak semua kempen mungkin dijadualkan
+  },
+  minIntervalSeconds: {
+    type: Number,
+    default: 5 // Contoh default 5 saat
+  },
+  maxIntervalSeconds: {
+    type: Number,
+    default: 10 // Contoh default 10 saat
+  },
+  // Field untuk Schedule Time yang lebih kompleks (Daytime, Nighttime, Odd, Even, Select Time)
+  // Ini mungkin memerlukan pemikiran lanjut bagaimana data ini disimpan dan diguna.
+  // Untuk permulaan, kita boleh simpan jenis jadual dan mungkin julat masa.
+  campaignScheduleType: { // Contoh: 'anytime', 'specific_daytime', 'specific_nighttime', 'specific_odd', 'specific_even', 'custom_slots'
+    type: String,
+    default: 'anytime' 
+  },
+  campaignScheduleDetails: { // Boleh jadi objek atau string JSON untuk simpan detail jadual
+    type: mongoose.Schema.Types.Mixed,
+    default: null
   }
 }, {
   timestamps: true

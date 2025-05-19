@@ -1,4 +1,5 @@
 const Contact = require('../models/Contact.js');
+const ContactGroup = require('../models/ContactGroup.js');
 const xlsx = require('xlsx');
 
 // @desc    Dapatkan semua kenalan pengguna
@@ -13,7 +14,7 @@ const getContacts = async (req, res) => {
 // @route   POST /contacts
 // @access  Private
 const addContact = async (req, res) => {
-  const { name, phoneNumber } = req.body;
+  const { name, phoneNumber, groupId } = req.body;
 
   if (!name || !phoneNumber) {
     res.status(400).json({ message: 'Nama dan nombor telefon diperlukan' });
@@ -21,20 +22,48 @@ const addContact = async (req, res) => {
   }
 
   // Semak jika nombor sudah wujud untuk pengguna ini
-  const contactExists = await Contact.findOne({ user: req.user._id, phoneNumber });
+  const cleanedPhoneNumber = String(phoneNumber).replace(/\D/g, '');
+  if (!cleanedPhoneNumber) {
+    return res.status(400).json({ message: 'Nombor telefon tidak sah.' });
+  }
+  const formattedPhoneNumberForCheck = `${cleanedPhoneNumber}@c.us`;
+
+  const contactExists = await Contact.findOne({ user: req.user._id, phoneNumber: formattedPhoneNumberForCheck });
   if (contactExists) {
-      res.status(400).json({ message: 'Nombor telefon sudah wujud dalam senarai anda' });
-      return;
+    res.status(400).json({ message: 'Nombor telefon sudah wujud dalam senarai anda' });
+    return;
   }
 
   const contact = new Contact({
     name,
-    phoneNumber,
+    phoneNumber: formattedPhoneNumberForCheck,
     user: req.user._id,
   });
 
-  const createdContact = await contact.save();
-  res.status(201).json(createdContact);
+  try {
+    const createdContact = await contact.save();
+
+    // Jika groupId diberikan, tambah kenalan ke kumpulan tersebut
+    if (groupId) {
+      const contactGroup = await ContactGroup.findOne({ _id: groupId, user: req.user._id });
+      if (contactGroup) {
+        if (!contactGroup.contacts.includes(createdContact._id)) {
+          contactGroup.contacts.push(createdContact._id);
+          contactGroup.contactCount = contactGroup.contacts.length;
+          await contactGroup.save();
+        }
+      } else {
+        // Kumpulan tidak ditemui atau bukan milik pengguna, tapi kenalan tetap dicipta.
+        // Boleh hantar amaran jika perlu.
+        console.warn(`Kumpulan dengan ID ${groupId} tidak ditemui untuk pengguna ${req.user._id} semasa menambah kenalan.`);
+      }
+    }
+    res.status(201).json(createdContact);
+  } catch (error) {
+    console.error("Ralat menambah kenalan:", error);
+    // Jika gagal simpan kenalan, tiada apa yang perlu di-rollback dari group
+    res.status(500).json({ message: 'Gagal menyimpan kenalan.', error: error.message });
+  }
 };
 
 // @desc    Padam kenalan
@@ -45,8 +74,18 @@ const deleteContact = async (req, res) => {
 
   // Pastikan kenalan wujud dan dimiliki oleh pengguna
   if (contact && contact.user.toString() === req.user._id.toString()) {
-    await contact.deleteOne(); // Guna deleteOne pada instance
-    res.json({ message: 'Kenalan dipadam' });
+    try {
+      await contact.deleteOne();
+      // Selepas memadam kenalan, alih keluar dari semua kumpulan yang mengandunginya
+      await ContactGroup.updateMany(
+        { user: req.user._id, contacts: req.params.id },
+        { $pull: { contacts: req.params.id }, $inc: { contactCount: -1 } }
+      );
+      res.json({ message: 'Kenalan dipadam dan dialih keluar dari semua kumpulan.' });
+    } catch (error) {
+      console.error("Ralat memadam kenalan atau mengalih keluar dari kumpulan:", error);
+      res.status(500).json({ message: 'Ralat semasa memadam kenalan.' });
+    }
   } else {
     res.status(404).json({ message: 'Kenalan tidak ditemui atau anda tidak dibenarkan' });
   }
@@ -56,83 +95,118 @@ const deleteContact = async (req, res) => {
 // @route   POST /contacts/upload
 // @access  Private
 const uploadContacts = async (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ message: 'Tiada fail dimuat naik.' });
-    }
+  const { groupId } = req.body;
 
+  if (!req.file) {
+    return res.status(400).json({ message: 'Tiada fail dimuat naik.' });
+  }
+
+  let targetGroup = null;
+  if (groupId) {
     try {
-        // Baca fail dari buffer memori
-        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        
-        // Tukar sheet kepada JSON - anggap baris pertama adalah header
-        const data = xlsx.utils.sheet_to_json(worksheet);
-
-        if (!data || data.length === 0) {
-            return res.status(400).json({ message: 'Fail Excel kosong atau format tidak sah.' });
-        }
-
-        const contactsToInsert = [];
-        const errors = [];
-        const existingNumbers = new Set((await Contact.find({ user: req.user._id }, 'phoneNumber')).map(c => c.phoneNumber)); // Dapatkan nombor sedia ada
-
-        data.forEach((row, index) => {
-            const name = row['Nama']; // Anggap nama lajur 'Nama'
-            let phoneNumber = row['Nombor Telefon']; // Anggap nama lajur 'Nombor Telefon'
-
-            if (!name || !phoneNumber) {
-                errors.push(`Baris ${index + 2}: Nama atau Nombor Telefon tiada.`);
-                return; // Skip baris ini
-            }
-            
-            // Bersihkan & format nombor telefon
-            phoneNumber = String(phoneNumber).replace(/\D/g, ''); // Buang bukan digit
-            if (!phoneNumber) { // Jika selepas dibuang, nombor kosong
-                 errors.push(`Baris ${index + 2}: Nombor Telefon tidak sah.`);
-                 return;
-            }
-            const formattedPhoneNumber = `${phoneNumber}@c.us`;
-
-            // Semak duplikasi dalam fail ini dan dengan data sedia ada
-            if (existingNumbers.has(formattedPhoneNumber) || contactsToInsert.some(c => c.phoneNumber === formattedPhoneNumber)) {
-                errors.push(`Baris ${index + 2}: Nombor Telefon ${phoneNumber} sudah wujud.`);
-                return; // Skip duplikasi
-            }
-
-            contactsToInsert.push({
-                name: String(name).trim(),
-                phoneNumber: formattedPhoneNumber,
-                user: req.user._id,
-            });
-        });
-
-        let createdCount = 0;
-        if (contactsToInsert.length > 0) {
-            try {
-                // Guna insertMany untuk kecekapan, ordered: false untuk teruskan jika ada ralat individu
-                const result = await Contact.insertMany(contactsToInsert, { ordered: false });
-                createdCount = result.length;
-            } catch (insertError) {
-                 // insertMany dengan ordered:false masih boleh throw error jika tiada yang berjaya
-                 // atau ralat lain. Tangkap dan log.
-                 console.error("Ralat semasa insertMany:", insertError);
-                 // Jika ada dokumen yang berjaya sebelum error, ia akan ada dalam error.insertedDocs
-                 createdCount = insertError.insertedDocs ? insertError.insertedDocs.length : 0;
-                 errors.push("Ralat semasa menyimpan sebahagian data ke pangkalan data.");
-            }
-        }
-
-        res.status(201).json({
-            message: `${createdCount} kenalan berjaya ditambah. ${errors.length > 0 ? 'Beberapa baris diabaikan.' : ''}`,
-            successCount: createdCount,
-            errors: errors,
-        });
-
-    } catch (error) {
-        console.error("Ralat memproses fail Excel:", error);
-        res.status(500).json({ message: 'Ralat pelayan semasa memproses fail.', error: error.message });
+      targetGroup = await ContactGroup.findOne({ _id: groupId, user: req.user._id });
+      if (!targetGroup) {
+        return res.status(404).json({ message: `Kumpulan dengan ID ${groupId} tidak ditemui atau bukan milik anda.` });
+      }
+    } catch (groupError) {
+      if (groupError.kind === 'ObjectId') {
+        return res.status(400).json({ message: `ID Kumpulan ${groupId} tidak sah.` });
+      }
+      console.error("Ralat mencari kumpulan:", groupError);
+      return res.status(500).json({ message: 'Ralat semasa mengakses kumpulan kenalan.' });
     }
+  }
+
+  try {
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(worksheet);
+
+    if (!data || data.length === 0) {
+      return res.status(400).json({ message: 'Fail Excel kosong atau format tidak sah.' });
+    }
+
+    const contactsToInsert = [];
+    const errors = [];
+    const existingNumbers = new Set((await Contact.find({ user: req.user._id }, 'phoneNumber')).map(c => c.phoneNumber));
+
+    data.forEach((row, index) => {
+      const name = row['Nama'] || row['Name'];
+      let phoneNumber = row['Nombor Telefon'] || row['Phone Number'] || row['PhoneNumber'];
+
+      if (!name || !phoneNumber) {
+        errors.push(`Baris ${index + 2}: Nama atau Nombor Telefon tiada.`);
+        return;
+      }
+      
+      phoneNumber = String(phoneNumber).replace(/\D/g, '');
+      if (!phoneNumber) {
+        errors.push(`Baris ${index + 2}: Nombor Telefon tidak sah.`);
+        return;
+      }
+      const formattedPhoneNumber = `${phoneNumber}@c.us`;
+
+      if (existingNumbers.has(formattedPhoneNumber) || contactsToInsert.some(c => c.phoneNumber === formattedPhoneNumber)) {
+        errors.push(`Baris ${index + 2}: Nombor Telefon ${phoneNumber} (${formattedPhoneNumber}) sudah wujud.`);
+        return;
+      }
+
+      contactsToInsert.push({
+        name: String(name).trim(),
+        phoneNumber: formattedPhoneNumber,
+        user: req.user._id,
+      });
+    });
+
+    let createdContacts = [];
+    if (contactsToInsert.length > 0) {
+      try {
+        createdContacts = await Contact.insertMany(contactsToInsert, { ordered: false });
+      } catch (insertError) {
+        console.error("Ralat semasa insertMany:", insertError);
+        createdContacts = insertError.insertedDocs || [];
+        if (createdContacts.length < contactsToInsert.length) {
+          errors.push(`Sebahagian data gagal disimpan ke pangkalan data. Berjaya: ${createdContacts.length}, Gagal: ${contactsToInsert.length - createdContacts.length}`);
+        } else if (createdContacts.length === 0) {
+          errors.push("Tiada data berjaya disimpan ke pangkalan data disebabkan ralat.");
+        }
+      }
+    }
+    
+    let message = `${createdContacts.length} kenalan berjaya ditambah.`;
+    
+    // Jika ada targetGroup, tambah kenalan yang berjaya dicipta ke group
+    if (targetGroup && createdContacts.length > 0) {
+      const newContactIds = createdContacts.map(c => c._id);
+      let addedToGroupCount = 0;
+      newContactIds.forEach(id => {
+        if (!targetGroup.contacts.includes(id)) {
+          targetGroup.contacts.push(id);
+          addedToGroupCount++;
+        }
+      });
+      if (addedToGroupCount > 0) {
+        targetGroup.contactCount = targetGroup.contacts.length;
+        await targetGroup.save();
+        message += ` ${addedToGroupCount} daripadanya ditambah ke kumpulan '${targetGroup.groupName}'.`;
+      }
+    }
+
+    if (errors.length > 0) {
+      message += ` ${errors.length > 0 ? 'Beberapa baris diabaikan atau gagal.' : ''}`;
+    }
+
+    res.status(201).json({
+      message: message,
+      successCount: createdContacts.length,
+      errors: errors,
+    });
+
+  } catch (error) {
+    console.error("Ralat memproses fail Excel:", error);
+    res.status(500).json({ message: 'Ralat pelayan semasa memproses fail.', errorDetail: error.message });
+  }
 };
 
 module.exports = {

@@ -42,7 +42,7 @@ router.get('/dashboard/bulk-campaign-summary', protect, asyncHandler(async (req,
         campaignType: 'bulk' // Hanya ambil kempen pukal
     })
     .sort({ createdAt: -1 })
-    .select('campaignName sentCount failedCount createdAt'); // Pilih medan yang diperlukan
+    .select('campaignName sentCount failedCount createdAt deviceId'); // TAMBAH deviceId
 
     // Format data jika perlu, atau terus kembalikan
     const formattedCampaigns = campaigns.map(campaign => ({
@@ -50,6 +50,7 @@ router.get('/dashboard/bulk-campaign-summary', protect, asyncHandler(async (req,
         name: campaign.campaignName,
         sent: campaign.sentCount,
         failed: campaign.failedCount,
+        deviceId: campaign.deviceId, // TAMBAH deviceId
         // date: campaign.createdAt // Boleh tambah jika mahu papar tarikh
     }));
 

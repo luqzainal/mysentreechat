@@ -10,13 +10,11 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ContactPage from './pages/ContactPage';
-import BulkSender from './pages/BulkSender';
 import AutoresponderPage from './pages/AIChatbotPage';
 import MembershipPage from './pages/MembershipPage';
 import AccountPage from './pages/AccountPage';
 import MediaStoragePage from './pages/MediaStoragePage';
 import UserListPage from './pages/admin/UserListPage'; // Import halaman admin
-import ChatPage from './pages/ChatPage'; // <-- Import ChatPage baru
 import ScanDevicePage from './pages/ScanDevicePage'; // <-- Tambah import untuk ScanDevicePage
 // Import halaman baru untuk Campaign
 import CampaignListPage from './pages/CampaignListPage'; // <-- BARU
@@ -73,14 +71,9 @@ const Header = () => {
   // Susunan Navbar Baru: Dashboard, Scan Device, Upload Contacts, AI Chatbot, Chat, Bulk Sender
   const menuItems = [
     { to: "/", icon: LayoutDashboard, title: "Dashboard" },
-    { to: "/scan-device", icon: QrCode, title: "Scan Device" }, // <-- BARU
-    { to: "/contacts", icon: Users, title: "Upload Contacts" }, // Tukar title
-    { to: "/ai-chatbot", icon: Bot, title: "AI Chatbot" }, // Tukar path dan title
-    { to: "/chat", icon: MessageSquare, title: "Chat" },
-    { to: "/bulk-sender", icon: Send, title: "Bulk Sender" },
-    // { to: "/media-storage", icon: ImageIcon, title: "Media Storage" }, // Buang
-    // { to: "/membership", icon: BadgeInfo, title: "Membership" }, // Buang
-    // { to: "/account", icon: UserCog, title: "Account" }, // Buang dari navbar utama
+    { to: "/scan-device", icon: QrCode, title: "Scan Device" },
+    { to: "/contacts", icon: Users, title: "Upload Contacts" },
+    { to: "/ai-chatbot", icon: Bot, title: "AI Chatbot" },
   ];
 
   // Tambah pautan admin jika role === 'admin'
@@ -290,9 +283,7 @@ function App() {
       <Route element={<MainLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="/scan-device" element={<ScanDevicePage />} />
-        <Route path="/chat" element={<ChatPage />} />
         <Route path="/contacts" element={<ContactPage />} />
-        <Route path="/bulk-sender" element={<BulkSender />} />
         <Route path="/ai-chatbot" element={<AutoresponderPage />} />
         <Route path="/ai-chatbot/:numberId/campaigns" element={<CampaignListPage />} />
         <Route path="/ai-chatbot/:numberId/campaigns/create" element={<AddCampaignPage />} />
@@ -300,6 +291,8 @@ function App() {
         <Route path="/media-storage" element={<MediaStoragePage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/campaigns" element={<CampaignListPage />} />
+        <Route path="/dashboard/add-campaign/:deviceId?/:campaignId?" element={<AddCampaignPage />} />
 
         {/* Laluan Admin (dilindungi) */}
         <Route element={<AdminRouteGuard />}> { /* Bungkus laluan admin */}

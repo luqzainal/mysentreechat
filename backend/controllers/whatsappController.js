@@ -1,15 +1,16 @@
 const Contact = require('../models/Contact.js');
 const Message = require('../models/Message.js');
 const Campaign = require('../models/Campaign.js');
-const { getWhatsAppSocket, destroyClientByUserId, connectToWhatsApp } = require('../services/baileysService.js');
+const baileysService = require('../services/baileysService.js');
 const { processSpintax } = require('../utils/spintaxUtils.js');
 
-// Fungsi helper untuk format nombor ke JID WhatsApp
+// Fungsi helper untuk format nombor ke JID WhatsApp (sesuai untuk Baileys)
 const formatToJid = (number) => {
-  // Buang simbol bukan digit
   const digits = number.replace(/\D/g, '');
-  // Tambah @c.us (sepatutnya @c.us untuk chat biasa, bukan @s.whatsapp.net)
-  return `${digits}@c.us`; 
+  if (digits.endsWith('@g.us')) { // Jika sudah format group JID
+    return digits;
+  }
+  return `${digits}@s.whatsapp.net`; // Untuk chat individu dengan Baileys
 };
 
 // Fungsi helper untuk menambah delay
@@ -20,7 +21,7 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // @access  Private
 const sendBulkMessage = async (req, res) => {
   const { message, contactIds, campaignId, deviceId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user._id.toString();
 
   if (!message || !contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
     return res.status(400).json({ message: 'Message and at least one contact ID are required.' });
@@ -28,17 +29,38 @@ const sendBulkMessage = async (req, res) => {
   if (!campaignId) {
     return res.status(400).json({ message: 'campaignId is required for bulk messaging.' });
   }
-  if (!deviceId) {
+  if (!deviceId) { // deviceId dari frontend merujuk kepada rekod WhatsappDevice
     return res.status(400).json({ message: 'deviceId is required.'});
   }
 
-  const client = getWhatsAppSocket(userId);
+  const sock = baileysService.getWhatsAppSocket(userId); // Dapatkan klien Baileys (sock)
 
-  if (!client) {
-     return res.status(400).json({ message: 'WhatsApp connection is not active for this user. Please connect first.' });
+  if (!sock || !sock.user) { // Semak jika sock wujud dan ada user (menandakan sambungan aktif)
+     console.warn(`[sendBulkMessage] Baileys client not found or not connected for user ${userId}. Attempting to check DB status for deviceId ${deviceId}`);
+     try {
+        const deviceStatus = await WhatsappDevice.findOne({ userId, deviceId, connectionStatus: 'connected' });
+        if (!deviceStatus) {
+            return res.status(400).json({ message: `WhatsApp connection (Baileys) is not active for device ${deviceId}. Please connect first via Scan QR page.` });
+        }
+        return res.status(400).json({ message: `Baileys client for device ${deviceId} not found in memory, though DB indicates connection. Please try reconnecting the device.`});
+     } catch (dbError) {
+        console.error("[sendBulkMessage] DB Error checking device status:", dbError);
+        return res.status(500).json({ message: 'Server error checking Baileys connection status.' });
+     }
   }
 
   try {
+    // Muatkan kempen untuk dapatkan minIntervalSeconds dan maxIntervalSeconds
+    const currentCampaign = await Campaign.findById(campaignId);
+    if (!currentCampaign) {
+        console.error(`[sendBulkMessage] Campaign with ID ${campaignId} not found.`);
+        // Teruskan tanpa interval spesifik kempen, atau kembalikan ralat?
+        // Untuk sekarang, guna default jika kempen tidak ditemui.
+    }
+
+    const minInterval = currentCampaign?.minIntervalSeconds || 5;
+    const maxInterval = currentCampaign?.maxIntervalSeconds || 10;
+
     const contacts = await Contact.find({ 
       _id: { $in: contactIds }, 
       user: userId 
@@ -53,21 +75,25 @@ const sendBulkMessage = async (req, res) => {
     const results = [];
 
     for (const contact of contacts) {
-      const targetJid = contact.phoneNumber;
+      const targetJid = formatToJid(contact.phoneNumber);
       try {
         const spunMessage = processSpintax(message);
-        console.log(`Sending bulk message (spun) to ${contact.name} (${targetJid}) for campaign ${campaignId}`);
+        console.log(`[sendBulkMessage] Sending (via Baileys) to ${contact.name} (${targetJid}) for campaign ${campaignId}, user ${userId}`);
         
-        await sendWhatsappMessageViaService(userId, targetJid, spunMessage, deviceId);
+        // Hantar mesej menggunakan Baileys: sock.sendMessage(jid, content, options)
+        // Untuk mesej teks biasa:
+        const sentMessageDetails = await sock.sendMessage(targetJid, { text: spunMessage });
         
-        results.push({ name: contact.name, number: contact.phoneNumber, status: 'Success' });
+        results.push({ name: contact.name, number: contact.phoneNumber, status: 'Success', messageId: sentMessageDetails?.key?.id });
         successCount++;
       } catch (error) {
-        console.error(`Failed to send bulk to ${targetJid} for campaign ${campaignId}:`, error);
+        console.error(`[sendBulkMessage] Failed to send (via Baileys) to ${targetJid} for campaign ${campaignId}, user ${userId}:`, error);
         results.push({ name: contact.name, number: contact.phoneNumber, status: 'Failed', error: error.message });
         failCount++;
       }
-      await delay(Math.random() * 2000 + 1000); 
+      // Interval penghantaran
+      const randomDelay = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
+      await delay(randomDelay * 1000); 
     }
 
     if (campaignId) {
@@ -75,9 +101,9 @@ const sendBulkMessage = async (req, res) => {
             await Campaign.findByIdAndUpdate(campaignId, {
                 $inc: { sentCount: successCount, failedCount: failCount }
             });
-            console.log(`Campaign ${campaignId} stats updated: ${successCount} sent, ${failCount} failed.`);
+            console.log(`[sendBulkMessage] Campaign ${campaignId} stats updated: ${successCount} sent, ${failCount} failed.`);
         } catch (campaignUpdateError) {
-            console.error(`Failed to update campaign stats for ${campaignId}:`, campaignUpdateError);
+            console.error(`[sendBulkMessage] Failed to update campaign stats for ${campaignId}:`, campaignUpdateError);
         }
     }
 
@@ -87,7 +113,7 @@ const sendBulkMessage = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error in bulk send process:", error);
+    console.error("[sendBulkMessage] Error in bulk send process:", error);
     res.status(500).json({ message: 'Server error during bulk message sending.' });
   }
 };
@@ -137,43 +163,50 @@ const getChatHistory = async (req, res) => {
 // @desc    Hantar mesej individu
 // @route   POST /whatsapp/send
 // @access  Private
-const sendMessage = async (req, res) => {
+const sendMessageIndividual = async (req, res) => {
   const { to, message, deviceId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user._id.toString();
 
   if (!to || !message) {
     return res.status(400).json({ message: 'Recipient number (to) and message are required.' });
   }
-  if (!deviceId) {
-    return res.status(400).json({ message: 'deviceId is required to send message.' });
+  if (!deviceId) { 
+    return res.status(400).json({ message: 'deviceId is required.' });
   }
 
   const targetJid = formatToJid(to);
+  const sock = baileysService.getWhatsAppSocket(userId);
+
+  if (!sock || !sock.user) {
+    return res.status(400).json({ message: 'WhatsApp connection (Baileys) is not active for this user. Please connect first.' });
+  }
 
   try {
-    const sentMessage = await sendWhatsappMessageViaService(userId, targetJid, message, deviceId);
-    
+    console.log(`[sendMessageIndividual] Sending (via Baileys) to ${targetJid} for user ${userId}`);
+    const sentMessageDetails = await sock.sendMessage(targetJid, { text: message });
+    const messageId = sentMessageDetails?.key?.id;
+
     try {
         const newMessage = new Message({
             user: userId,
             chatJid: targetJid,
             body: message,
-            timestamp: new Date(sentMessage.timestamp * 1000),
+            timestamp: new Date(sentMessageDetails?.messageTimestamp ? parseInt(sentMessageDetails.messageTimestamp) * 1000 : Date.now()),
             fromMe: true,
-            messageId: sentMessage.id._serialized,
+            messageId: messageId || `baileys-${Date.now()}`,
             status: 'sent',
-            sourceDeviceId: deviceId
+            sourceDeviceId: deviceId 
         });
         await newMessage.save();
-        console.log(`Sent message to ${targetJid} from device ${deviceId} saved to DB.`);
+        console.log(`[sendMessageIndividual] Sent message to ${targetJid} (Baileys) saved to DB. Message ID: ${messageId}`);
     } catch (dbError) {
-        console.error(`Failed to save sent message for ${targetJid} (device ${deviceId}) to DB:`, dbError);
+        console.error(`[sendMessageIndividual] Failed to save sent message for ${targetJid} (Baileys) to DB:`, dbError);
     }
 
-    res.status(200).json({ message: 'Message sent successfully.', messageId: sentMessage.id._serialized });
+    res.status(200).json({ message: 'Message sent successfully.', messageId: messageId });
 
   } catch (error) {
-    console.error(`Error sending message to ${targetJid} from device ${deviceId}:`, error);
+    console.error(`[sendMessageIndividual] Error sending message (Baileys) to ${targetJid}:`, error);
     res.status(500).json({ message: error.message || 'Failed to send message.' });
   }
 };
@@ -235,7 +268,7 @@ const getChats = async (req, res) => {
 module.exports = {
   // Export semua fungsi controller di sini
   // getContacts, // Dipindahkan ke contactController.js
-  sendMessage,
+  sendMessage: sendMessageIndividual,
   // getMessages, // Nampaknya tidak digunakan/didefinisikan
   // getChats, // Nampaknya tidak digunakan/didefinisikan
   // getScanQRCode, // Nampaknya tidak digunakan/didefinisikan

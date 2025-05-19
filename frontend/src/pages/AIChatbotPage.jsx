@@ -192,8 +192,8 @@ const AutoresponderPage = () => {
               <CardFooter className="flex justify-between gap-3 p-4 bg-card border-t border-border">
                  {/* Tukar Add Item -> Add Campaign */}
                  <Button asChild className="flex-1" variant="default">
-                     {/* Pautan perlu dinamik berdasarkan ID nombor */}
-                     <Link to={`/ai-chatbot/${num.id}/campaigns/create`}>
+                     {/* Pautan perlu dinamik berdasarkan ID nombor dan menyertakan type */}
+                     <Link to={`/ai-chatbot/${num.id}/campaigns/create?type=ai_chatbot`}>
                          <PlusCircle className="mr-2 h-4 w-4" /> Add Campaign
                      </Link>
                  </Button>

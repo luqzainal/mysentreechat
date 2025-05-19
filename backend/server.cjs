@@ -15,10 +15,14 @@ const contactRoutes = require('./routes/contactRoutes.js');
 const autoresponderRoutes = require('./routes/autoresponderRoutes.js'); 
 const mediaRoutes = require('./routes/mediaRoutes.js');
 const aiChatbotRoutes = require('./routes/aiChatbotRoutes.js');
-const { initializeWhatsAppService,
-        getWhatsAppSocket,
-        connectToWhatsApp,
-        destroyClientByUserId } = require('./services/baileysService.js');
+const contactGroupRoutes = require('./routes/contactGroupRoutes.js');
+const {
+    initializeWhatsAppService,
+    getWhatsAppSocket,
+    connectToWhatsApp,
+    destroyClientByUserId,
+    cleanupWhatsAppClients
+} = require('./services/baileysService.js');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware.js');
 const mongoose = require('mongoose');
 const User = require('./models/User');
@@ -68,6 +72,7 @@ app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai-chatbot', aiChatbotRoutes);
+app.use('/api/contact-groups', contactGroupRoutes);
 
 // Initialize WhatsApp Service selepas io dicipta
 initializeWhatsAppService(io);
@@ -233,7 +238,8 @@ const gracefulShutdown = async (signal) => {
         // 3. Bersihkan client WhatsApp (Gunakan Baileys)
         try {
             // await whatsappService.cleanupWhatsAppClients(); // Panggil servis lama
-            await baileysService.cleanupWhatsAppClients(); // Panggil servis Baileys
+            // await baileysService.cleanupWhatsAppClients(); // Tidak perlu panggil melalui objek jika sudah di-destructure
+            await cleanupWhatsAppClients(); // Panggil terus fungsi yang diimport
             console.log('Client WhatsApp (Baileys) telah dibersihkan.');
         } catch (cleanupError) {
             console.error('Ralat semasa membersihkan client WhatsApp (Baileys):', cleanupError);

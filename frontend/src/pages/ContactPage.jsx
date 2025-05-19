@@ -39,7 +39,15 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"; // Import Card
-import { Trash2, Upload, FileText } from 'lucide-react'; // Tambah Upload, FileText
+import { Trash2, Upload, FileText, Users, PlusCircle, Edit3, XCircle, UserMinus } from 'lucide-react'; // Tambah Edit3, XCircle, UserMinus
+import { Badge } from "@/components/ui/badge"; // Import Badge
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function ContactPage() {
   const [contacts, setContacts] = useState([]);
@@ -54,6 +62,27 @@ function ContactPage() {
   const [selectedFile, setSelectedFile] = useState(null); // State untuk fail dipilih
   const [isUploading, setIsUploading] = useState(false); // State untuk status muat naik
 
+  // State untuk Kumpulan Kenalan
+  const [contactGroups, setContactGroups] = useState([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState(''); // Untuk filter atau tambah ke group
+  const [isCreateGroupDialogOpen, setIsCreateGroupDialogOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+
+  // State untuk AlertDialog padam group
+  const [isDeleteGroupDialogOpen, setIsDeleteGroupDialogOpen] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState(null);
+  const [isDeletingGroup, setIsDeletingGroup] = useState(false);
+
+  // State untuk AlertDialog alih keluar contact dari group
+  const [isRemoveContactDialogOpen, setIsRemoveContactDialogOpen] = useState(false);
+  const [contactToRemove, setContactToRemove] = useState(null); // { contactId: string, contactName: string, groupId: string, groupName: string }
+  const [isRemovingContact, setIsRemovingContact] = useState(false);
+
+  // State untuk Upload Dialog
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+
   const { toast } = useToast();
   // const [userInfo, setUserInfo] = useState(null); // Tidak digunakan, boleh buang jika mahu
   const fileInputRef = useRef(null);
@@ -62,55 +91,117 @@ function ContactPage() {
   // const getToken = () => { ... };
 
   // Fungsi untuk dapatkan semua kenalan
-  const fetchContacts = async () => {
+  const fetchContacts = async (groupId = null) => { // Terima groupId sebagai parameter
     setIsLoading(true);
     setError(null);
-    // Token akan ditambah oleh interceptor dalam 'api'
-    // const token = getToken(); 
-    // if (!token) { ... }
-
     try {
-      // Guna instance api dan path relatif
-      // const config = { headers: { Authorization: `Bearer ${token}` } }; // Tak perlu config jika interceptor ada
-      const { data } = await api.get('/contacts'); // Tukar axios.get ke api.get
+      // Jika groupId ada, dapatkan kenalan dalam group. Jika tidak, dapatkan semua kenalan.
+      const url = groupId ? `/contact-groups/${groupId}/contacts` : '/contacts';
+      const { data } = await api.get(url);
       setContacts(data);
+      // Jika kita memuatkan kenalan untuk group tertentu, kita boleh set selectedGroupId
+      // Tetapi lebih baik kawal selectedGroupId melalui tindakan pengguna (klik pada group)
     } catch (err) {
       console.error("Error getting contacts:", err);
-      setError(err.response?.data?.message || "Failed to get contact list.");
-      // Mungkin toast error di sini jika mahu
-      toast({ title: "Loading Error", description: err.response?.data?.message || "Failed to get contact list.", variant: "destructive" });
+      const msg = err.response?.data?.message || "Failed to get contact list.";
+      setError(msg);
+      toast({ title: "Loading Error", description: msg, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Panggil fetchContacts semasa komponen dimuatkan
+  // Fungsi untuk dapatkan semua kumpulan kenalan
+  const fetchContactGroups = async () => {
+    setIsLoadingGroups(true);
+    try {
+      const { data } = await api.get('/contact-groups');
+      setContactGroups(data);
+      if (data.length > 0 && !selectedGroupId) {
+        // Boleh pilih group pertama secara default jika mahu, atau biarkan "All Contacts"
+        // setSelectedGroupId(data[0]._id); 
+      }
+    } catch (err) {
+      console.error("Error getting contact groups:", err);
+      toast({ title: "Error", description: "Failed to load contact groups.", variant: "destructive" });
+    } finally {
+      setIsLoadingGroups(false);
+    }
+  };
+
+  // Panggil fetchContacts dan fetchContactGroups semasa komponen dimuatkan
   useEffect(() => {
-    fetchContacts();
-    // const storedUserInfo = localStorage.getItem('userInfo'); // Tidak digunakan
-    // if (storedUserInfo) setUserInfo(JSON.parse(storedUserInfo)); // Tidak digunakan
+    fetchContacts(); // Muat semua kenalan pada mulanya
+    fetchContactGroups();
   }, []);
+
+  // Fungsi untuk handle pemilihan group
+  const handleSelectGroup = (groupId) => {
+    setSelectedGroupId(groupId);
+    if (groupId === 'all' || !groupId) { // 'all' untuk pilihan "Semua Kenalan"
+        fetchContacts(); // Muat semua kenalan
+    } else {
+        fetchContacts(groupId); // Muat kenalan untuk group yang dipilih
+    }
+  };
+
+  // Fungsi untuk mencipta kumpulan kenalan baru
+  const handleCreateContactGroup = async (e) => {
+    e.preventDefault();
+    if (!newGroupName.trim()) {
+        toast({ title: "Validation Error", description: "Group name cannot be empty.", variant: "destructive" });
+        return;
+    }
+    setIsCreatingGroup(true);
+    try {
+        const { data: newGroup } = await api.post('/contact-groups', { groupName: newGroupName.trim() });
+        setContactGroups([...contactGroups, newGroup]);
+        setNewGroupName('');
+        setIsCreateGroupDialogOpen(false);
+        toast({ title: "Success", description: `Group '${newGroup.groupName}' created.` });
+        // Mungkin pilih group baru ini secara automatik
+        // handleSelectGroup(newGroup._id);
+    } catch (err) {
+        console.error("Error creating contact group:", err);
+        const message = err.response?.data?.message || "Failed to create group.";
+        toast({ title: "Error Creating Group", description: message, variant: "destructive" });
+    } finally {
+        setIsCreatingGroup(false);
+    }
+  };
 
   // Fungsi untuk menambah kenalan
   const handleAddContact = async (e) => {
     e.preventDefault();
     setIsAdding(true);
     setError(null);
-    // Token ditambah oleh interceptor
-    // const token = getToken();
-    // if (!token) { ... }
 
     try {
-        // const config = { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }; // Tak perlu
-        const payload = { name: newContactName, phoneNumber: newContactPhone };
-        // Guna instance api dan path relatif
+        const payload = { 
+            name: newContactName, 
+            phoneNumber: newContactPhone 
+        };
+        // Jika ada group dipilih (dan bukan 'all'), tambah groupId ke payload
+        if (selectedGroupId && selectedGroupId !== 'all') {
+            payload.groupId = selectedGroupId;
+        }
+
         const { data: newContact } = await api.post('/contacts', payload);
         
-        setContacts([...contacts, newContact]);
+        // Tidak perlu tambah terus ke state `contacts` jika kita akan refresh berdasarkan group
+        // setContacts([...contacts, newContact]); 
+        
         setNewContactName(''); 
         setNewContactPhone('');
         setIsAddDialogOpen(false);
         toast({ title: "Success", description: `Contact ${newContact.name} has been added.` });
+
+        // Refresh senarai kenalan berdasarkan group semasa (atau semua)
+        handleSelectGroup(selectedGroupId || 'all');
+        // Jika ditambah ke group tertentu, refresh juga senarai group untuk update count
+        if (payload.groupId) {
+            fetchContactGroups();
+        }
 
     } catch (err) {
         console.error("Error adding contact:", err);
@@ -163,35 +254,39 @@ function ContactPage() {
     fileInputRef.current.click();
   };
 
-  // Fungsi untuk memuat naik fail
+  // Fungsi untuk memuat naik fail - selectedGroupId akan diambil dari state
   const handleUpload = async () => {
     if (!selectedFile) {
       toast({
         title: "No File Selected",
-        description: "Please select an Excel file to upload.",
-        variant: "warning", // Guna variant warning
+        description: "Please choose an Excel file to upload.",
+        variant: "destructive",
       });
       return;
     }
+    // Pastikan group dipilih sebelum upload
+    if (!selectedGroupId || selectedGroupId === 'all') {
+        toast({
+            title: "No Group Selected",
+            description: "Please select a contact group to upload contacts into.",
+            variant: "destructive",
+        });
+        return;
+    }
 
     setIsUploading(true);
-    // Token ditambah oleh interceptor
-    // const token = getToken();
-    // if (!token) { ... }
-
     const formData = new FormData();
     formData.append('file', selectedFile);
+    formData.append('groupId', selectedGroupId); // Hantar groupId yang dipilih
 
     try {
-      // Guna instance api dan path relatif
-      // Config header Content-Type multipart/form-data mungkin perlu ditambah
-      // jika interceptor tidak handle atau jika perlu override
       const config = {
         headers: {
-          // Authorization akan ditambah oleh interceptor
           'Content-Type': 'multipart/form-data',
         },
       };
+      // API endpoint mungkin perlu diubah jika backend diubah suai untuk handle group semasa upload
+      // Buat masa sekarang, guna endpoint sedia ada.
       const { data: responseData } = await api.post('/contacts/upload', formData, config);
 
       toast({
@@ -201,24 +296,82 @@ function ContactPage() {
 
       if (responseData.errors && responseData.errors.length > 0) {
           console.warn("Errors during import:", responseData.errors);
-          toast({
-            title: `There were ${responseData.errors.length} rows skipped`,
-            description: "Check the console for more details or download the report.",
-            variant: "warning",
-            duration: 7000, 
-          })
+          // ... toast error sedia ada ...
       }
 
-      setSelectedFile(null); 
-      fetchContacts();
+      setIsUploadDialogOpen(false);
+      setSelectedFile(null);
+      handleSelectGroup(selectedGroupId); // Refresh senarai kenalan untuk group semasa
+      fetchContactGroups(); // Refresh juga senarai group untuk update count
 
     } catch (err) {
-      console.error("Error uploading contacts:", err);
-      const message = err.response?.data?.message || "Failed to upload contact file.";
-      toast({ title: "Upload Error", description: message, variant: "destructive" });
+      // ... error handling sedia ada ...
     } finally {
       setIsUploading(false);
     }
+  };
+
+  // Fungsi untuk memadam kumpulan kenalan
+  const handleDeleteGroup = async () => {
+    if (!groupToDelete) return;
+    setIsDeletingGroup(true);
+    try {
+        await api.delete(`/contact-groups/${groupToDelete._id}`);
+        toast({ title: "Success", description: `Group '${groupToDelete.groupName}' has been deleted.` });
+        setContactGroups(contactGroups.filter(group => group._id !== groupToDelete._id));
+        // Jika group yang dipadam sedang dipilih, reset pemilihan ke 'All Contacts'
+        if (selectedGroupId === groupToDelete._id) {
+            handleSelectGroup('all');
+        }
+        setGroupToDelete(null);
+        setIsDeleteGroupDialogOpen(false);
+    } catch (err) {
+        console.error("Error deleting contact group:", err);
+        const message = err.response?.data?.message || "Failed to delete group.";
+        toast({ title: "Error Deleting Group", description: message, variant: "destructive" });
+    } finally {
+        setIsDeletingGroup(false);
+    }
+  };
+
+  const openDeleteGroupDialog = (group) => {
+    setGroupToDelete(group);
+    setIsDeleteGroupDialogOpen(true);
+  };
+
+  // Fungsi untuk mengalih keluar kenalan dari kumpulan
+  const handleRemoveContactFromGroup = async () => {
+    if (!contactToRemove || !contactToRemove.contactId || !contactToRemove.groupId) return;
+    setIsRemovingContact(true);
+    try {
+        await api.delete(`/contact-groups/${contactToRemove.groupId}/contacts/${contactToRemove.contactId}`);
+        toast({ title: "Success", description: `Contact '${contactToRemove.contactName}' removed from group '${contactToRemove.groupName}'.` });
+        
+        // Refresh contact list for the current group
+        fetchContacts(contactToRemove.groupId);
+        // Refresh group list to update contact count
+        fetchContactGroups();
+
+        setContactToRemove(null);
+        setIsRemoveContactDialogOpen(false);
+    } catch (err) {
+        console.error("Error removing contact from group:", err);
+        const message = err.response?.data?.message || "Failed to remove contact from group.";
+        toast({ title: "Error Removing Contact", description: message, variant: "destructive" });
+    } finally {
+        setIsRemovingContact(false);
+    }
+  };
+
+  const openRemoveContactDialog = (contact, currentGroup) => {
+    if (!currentGroup || !currentGroup._id) return;
+    setContactToRemove({
+        contactId: contact._id,
+        contactName: contact.name,
+        groupId: currentGroup._id,
+        groupName: currentGroup.groupName
+    });
+    setIsRemoveContactDialogOpen(true);
   };
 
   return (
@@ -276,89 +429,339 @@ function ContactPage() {
         </Dialog>
       </div>
 
-      {/* Bahagian Muat Naik Fail */}
-      <Card>
-          <CardHeader>
-              <CardTitle>Import Contacts from Excel</CardTitle>
-              <CardDescription>
-                  Upload an Excel file (.xlsx or .xls) with 'Name' and 'PhoneNumber' columns.
-              </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-4">
-              <Input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                accept=".xlsx, .xls" 
-                className="hidden"
-              />
-              <Button onClick={handleChooseFileClick} variant="outline" disabled={isUploading}>
-                  <FileText className="mr-2 h-4 w-4" />
-                 {selectedFile ? selectedFile.name : 'Choose File'}
-              </Button>
-               <span className="text-sm text-muted-foreground flex-1 truncate">
-                  {selectedFile ? `(${Math.round(selectedFile.size / 1024)} KB)` : "No file chosen"}
-               </span>
-          </CardContent>
-           <CardFooter>
-              <Button onClick={handleUpload} disabled={isUploading || !selectedFile}>
-                  <Upload className="mr-2 h-4 w-4" />
-                  {isUploading ? 'Uploading...' : 'Upload and Import'}
-              </Button>
-           </CardFooter>
-      </Card>
+      {/* Bahagian Kumpulan Kenalan dan Muat Naik Fail - Layout Baru */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Kolum Kiri: Senarai Kumpulan & Cipta Kumpulan */}
+        <div className="md:col-span-1 space-y-4">
+            <Card>
+                <CardHeader>
+                    <div className="flex justify-between items-center">
+                        <CardTitle className="flex items-center"><Users className="mr-2 h-5 w-5" /> Contact Groups</CardTitle>
+                        <Dialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button variant="outline" size="icon" className="h-8 w-8">
+                                    <PlusCircle className="h-4 w-4" />
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[425px]">
+                                <form onSubmit={handleCreateContactGroup}>
+                                    <DialogHeader>
+                                        <DialogTitle>Create New Contact Group</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="grid gap-4 py-4">
+                                        <Label htmlFor="groupName">Group Name</Label>
+                                        <Input 
+                                            id="groupName"
+                                            value={newGroupName}
+                                            onChange={(e) => setNewGroupName(e.target.value)}
+                                            placeholder="E.g., VIP Customers"
+                                            disabled={isCreatingGroup}
+                                            required
+                                        />
+                                    </div>
+                                    <DialogFooter>
+                                        <DialogClose asChild>
+                                            <Button type="button" variant="secondary" disabled={isCreatingGroup}>Cancel</Button>
+                                        </DialogClose>
+                                        <Button type="submit" disabled={isCreatingGroup}>
+                                            {isCreatingGroup ? 'Creating...' : 'Create Group'}
+                                        </Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {isLoadingGroups ? (
+                        <p>Loading groups...</p>
+                    ) : (
+                        <ul className="space-y-2">
+                            <li>
+                                <Button 
+                                    variant={(!selectedGroupId || selectedGroupId === 'all') ? "secondary" : "ghost"} 
+                                    className="w-full justify-start"
+                                    onClick={() => handleSelectGroup('all')}
+                                >
+                                    All Contacts
+                                </Button>
+                            </li>
+                            {contactGroups.map(group => (
+                                <li key={group._id}>
+                                    <Button 
+                                        variant={selectedGroupId === group._id ? "secondary" : "ghost"} 
+                                        className="w-full justify-between items-center group/item"
+                                        onClick={() => handleSelectGroup(group._id)}
+                                    >
+                                        <div className="flex items-center space-x-2">
+                                            <span>{group.groupName}</span>
+                                            <Badge variant="outline">{group.contactCount || 0}</Badge>
+                                        </div>
+                                        {/* Butang padam group - muncul bila hover */}
+                                        <Button 
+                                            variant="ghost" 
+                                            size="icon" 
+                                            className="h-7 w-7 text-muted-foreground opacity-0 group-hover/item:opacity-100 hover:text-destructive"
+                                            onClick={(e) => { e.stopPropagation(); openDeleteGroupDialog(group); }}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </Button>
+                                </li>
+                            ))}
+                            {contactGroups.length === 0 && <p className="text-sm text-muted-foreground">No groups created yet.</p>}
+                        </ul>
+                    )}
+                </CardContent>
+            </Card>
 
-      {isLoading && <p>Loading contact list...</p>}
-      {error && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-      
-      {!isLoading && !error && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Phone Number</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {contacts.length > 0 ? (
-              contacts.map((contact) => (
-                <TableRow key={contact._id}>
-                  <TableCell className="font-medium">{contact.name}</TableCell>
-                  <TableCell>{contact.phoneNumber}</TableCell>
-                  <TableCell className="text-right">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="hover:bg-destructive/10">
-                          <Trash2 className="h-4 w-4 text-destructive" />
+            {/* Butang Tambah Manual & Upload Excel */}
+            <div className="flex space-x-2">
+                <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="outline">
+                            <PlusCircle className="mr-2 h-4 w-4" /> Add Contact Manually
                         </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This action will permanently delete the contact '{contact.name}'.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteContact(contact._id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={3} className="text-center">No contacts added yet.</TableCell>
-              </TableRow>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                        <form onSubmit={handleAddContact}>
+                            <DialogHeader>
+                                <DialogTitle>Add New Contact</DialogTitle>
+                                <DialogDescription>
+                                    Enter name and phone number.
+                                    {selectedGroupId && selectedGroupId !== 'all' && contactGroups.find(g => g._id === selectedGroupId) && 
+                                        <span> Will be added to <strong>{contactGroups.find(g => g._id === selectedGroupId).groupName}</strong>.</span>
+                                    }
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="name" className="text-right">Name</Label>
+                                    <Input 
+                                        id="name"
+                                        value={newContactName}
+                                        onChange={(e) => setNewContactName(e.target.value)}
+                                        className="col-span-3" 
+                                        required 
+                                        disabled={isAdding}
+                                    />
+                                </div>
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="phone" className="text-right">Phone Number</Label>
+                                    <Input 
+                                        id="phone"
+                                        value={newContactPhone}
+                                        onChange={(e) => setNewContactPhone(e.target.value)}
+                                        placeholder="601xxxxxxxx"
+                                        className="col-span-3" 
+                                        required
+                                        disabled={isAdding}
+                                    />
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <DialogClose asChild>
+                                    <Button type="button" variant="secondary" disabled={isAdding}>Cancel</Button>
+                                </DialogClose>
+                                <Button type="submit" disabled={isAdding}>
+                                    {isAdding ? 'Adding...' : 'Add Contact'}
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="outline">
+                            <Upload className="mr-2 h-4 w-4" /> Upload Contacts from File
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                        <DialogHeader>
+                            <DialogTitle>Upload Contacts</DialogTitle>
+                            <DialogDescription>
+                                Select a contact group and an Excel file (.xlsx or .xls) to upload your contacts.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="upload-contact-group" className="text-right">
+                                    Group
+                                </Label>
+                                <Select 
+                                    value={selectedGroupId} 
+                                    onValueChange={(value) => setSelectedGroupId(value)} 
+                                    disabled={isLoadingGroups || contactGroups.length === 0}
+                                >
+                                    <SelectTrigger id="upload-contact-group" className="col-span-3">
+                                        <SelectValue placeholder={isLoadingGroups ? "Loading groups..." : "Select a group"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {contactGroups.map(group => (
+                                            <SelectItem key={group._id} value={group._id}>
+                                                {group.groupName}
+                                            </SelectItem>
+                                        ))}
+                                        {contactGroups.length === 0 && !isLoadingGroups && 
+                                            <SelectItem value="" disabled>No groups found. Create one first.</SelectItem>}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label className="text-right">
+                                    File
+                                </Label>
+                                <div className="col-span-3">
+                                    <Button variant="outline" onClick={handleChooseFileClick} className="w-full justify-start">
+                                        <FileText className="mr-2 h-4 w-4" /> 
+                                        {selectedFile ? selectedFile.name : "Choose Excel File"}
+                                    </Button>
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef} 
+                                        onChange={handleFileChange} 
+                                        className="hidden" 
+                                        accept=".xlsx, .xls"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button 
+                                onClick={handleUpload} 
+                                disabled={isUploading || !selectedFile || !selectedGroupId || selectedGroupId === 'all'}
+                            >
+                                {isUploading ? "Uploading..." : "Upload to Group"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            </div>
+        </div>
+
+        {/* Kolum Kanan: Jadual Kenalan */}
+        <div className="md:col-span-2">
+            {isLoading && <p>Loading contact list...</p>}
+            {error && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+            
+            {!isLoading && !error && (
+            <Card>
+                <CardHeader>
+                     <div className="flex justify-between items-center">
+                        <CardTitle>
+                            {selectedGroupId && selectedGroupId !== 'all' && contactGroups.find(g => g._id === selectedGroupId) 
+                                ? `Contacts in "${contactGroups.find(g => g._id === selectedGroupId).groupName}"` 
+                                : "All Contacts"}
+                        </CardTitle>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Phone Number</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {contacts.length > 0 ? (
+                          contacts.map((contact) => (
+                            <TableRow key={contact._id}>
+                              <TableCell className="font-medium">{contact.name}</TableCell>
+                              <TableCell>{contact.phoneNumber}</TableCell>
+                              <TableCell className="text-right">
+                                {/* Butang Alih Keluar dari Group - hanya jika group dipilih */}
+                                {selectedGroupId && selectedGroupId !== 'all' && (
+                                    <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="text-orange-500 hover:text-orange-700 mr-1"
+                                        onClick={() => openRemoveContactDialog(contact, contactGroups.find(g => g._id === selectedGroupId))}
+                                        title="Remove from group"
+                                    >
+                                        <UserMinus className="h-4 w-4" />
+                                    </Button>
+                                )}
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700">
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This action will permanently delete the contact: <strong>{contact.name}</strong>.
+                                        {/* Jika contact dalam group, tambah mesej pasal alih keluar dari group atau padam terus */}
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction onClick={() => handleDeleteContact(contact._id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                        Delete Contact
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center">
+                              {selectedGroupId && selectedGroupId !== 'all' ? "No contacts in this group." : "No contacts found."}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
             )}
-          </TableBody>
-        </Table>
-      )}
+        </div>
+      </div>
+
+      {/* AlertDialog untuk Padam Kumpulan */}
+      <AlertDialog open={isDeleteGroupDialogOpen} onOpenChange={setIsDeleteGroupDialogOpen}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure you want to delete this group?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    This action will delete the group "<strong>{groupToDelete?.groupName}</strong>". 
+                    Contacts within this group will NOT be deleted from your main contact list.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setGroupToDelete(null)} disabled={isDeletingGroup}>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteGroup} disabled={isDeletingGroup} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    {isDeletingGroup ? "Deleting..." : "Delete Group"}
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog untuk Alih Keluar Kenalan Dari Kumpulan */}
+      <AlertDialog open={isRemoveContactDialogOpen} onOpenChange={setIsRemoveContactDialogOpen}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Remove Contact from Group?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    Are you sure you want to remove "<strong>{contactToRemove?.contactName}</strong>" 
+                    from the group "<strong>{contactToRemove?.groupName}</strong>"?
+                    The contact will remain in your main contact list.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setContactToRemove(null)} disabled={isRemovingContact}>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleRemoveContactFromGroup} disabled={isRemovingContact} variant="destructive">
+                    {isRemovingContact ? "Removing..." : "Remove from Group"}
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

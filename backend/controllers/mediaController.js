@@ -55,46 +55,49 @@ const upload = multer({
 // Controller Functions
 
 // @desc    Muat naik fail media
-// @route   POST /media/upload
+// @route   POST /media
 // @access  Private
-const uploadMedia = (req, res) => {
-    // Guna middleware upload multer
-    upload(req, res, async (err) => {
-        if (err instanceof multer.MulterError) {
-            // Ralat dari Multer (cth., saiz fail terlalu besar)
-            console.error("Multer Error:", err);
-            return res.status(400).json({ message: `Ralat muat naik: ${err.message}` });
-        } else if (err) {
-            // Ralat lain (cth., jenis fail tidak disokong)
-             console.error("File Upload Error:", err);
-            return res.status(400).json({ message: err.message || 'Ralat muat naik fail.' });
-        }
+const uploadMedia = async (req, res) => {
+    console.log("[mediaController] Entered uploadMedia controller function.");
+    console.log("[mediaController] req.file (from middleware):", req.file);
+    console.log("[mediaController] req.body (from middleware):", req.body);
+    // Ralat Multer mungkin telah ditangkap oleh error handler Express global atau perlu disemak jika req ada property error dari multer
+    // Untuk cara yang lebih mudah, kita boleh semak req.file terus.
+    // Middleware uploadMiddleware.js akan pass ralat ke error handler Express jika ada.
+    // Jika mahu handle ralat Multer secara spesifik di sini, kita perlukan cara untuk pass ralat itu.
+    // Buat masa ini, kita anggap jika ada ralat Multer, req.file mungkin tiada atau ada ralat di req.
 
-        // Jika tiada fail dipilih
-        if (!req.file) {
-            return res.status(400).json({ message: 'Sila pilih fail untuk dimuat naik.' });
-        }
+    // Jika ralat berlaku dalam uploadMiddleware (seperti jenis fail/saiz), ia sepatutnya tidak sampai ke sini
+    // atau akan ada error handler Express yang handle. Jika ia sampai sini tapi tiada req.file:
+    if (!req.file) {
+        console.log("[mediaController] req.file is undefined. Kemungkinan ralat dari middleware Multer atau tiada fail dihantar.");
+        // Mesej ralat sepatutnya lebih spesifik jika dari fileFilter atau limits.
+        // Jika ia hanya tiada fail, mesej ini ok.
+        return res.status(400).json({ message: 'Tiada fail diterima oleh pelayan atau ralat semasa pra-pemprosesan fail.' });
+    }
 
-        // Fail berjaya dimuat naik, simpan metadata ke DB
-        try {
-            const newMedia = await Media.create({
-                user: req.user._id,
-                originalName: req.file.originalname,
-                fileName: req.file.filename,
-                filePath: `/uploads/media/${req.file.filename}`, // Laluan relatif untuk akses statik
-                fileType: req.file.mimetype,
-                fileSize: req.file.size,
-            });
-            res.status(201).json(newMedia);
-        } catch (dbError) {
-            console.error("DB Error after upload:", dbError);
-            // Cuba padam fail yang dah termuat naik jika simpan DB gagal?
-            fs.unlink(req.file.path, (unlinkErr) => {
-                if (unlinkErr) console.error("Gagal padam fail selepas DB error:", unlinkErr);
-            });
-            res.status(500).json({ message: 'Gagal menyimpan maklumat fail ke pangkalan data.' });
-        }
-    });
+    // Fail berjaya diproses oleh middleware, simpan metadata ke DB
+    console.log("[mediaController] File processed by middleware:", req.file.filename);
+    try {
+        const newMedia = await Media.create({
+            user: req.user._id,
+            originalName: req.file.originalname,
+            fileName: req.file.filename,
+            filePath: `/uploads/media/${req.file.filename}`, 
+            fileType: req.file.mimetype,
+            fileSize: req.file.size,
+        });
+        console.log("[mediaController] Media metadata saved to DB:", newMedia._id);
+        res.status(201).json(newMedia);
+    } catch (dbError) {
+        console.error("[mediaController] DB Error after upload:", dbError);
+        // Penting: req.file.path merujuk kepada lokasi fail yang disimpan oleh Multer.
+        fs.unlink(req.file.path, (unlinkErr) => {
+            if (unlinkErr) console.error("[mediaController] Gagal padam fail selepas DB error:", unlinkErr);
+            else console.log("[mediaController] Fail sementara dipadam selepas DB error:", req.file.path);
+        });
+        res.status(500).json({ message: 'Gagal menyimpan maklumat fail ke pangkalan data.' });
+    }
 };
 
 // @desc    Dapatkan senarai media pengguna
