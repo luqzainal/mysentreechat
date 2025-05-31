@@ -7,34 +7,33 @@ const notFound = (req, res, next) => {
 
 // Middleware untuk handle ralat umum
 const errorHandler = (err, req, res, next) => {
-    // Kadang-kadang ralat mungkin datang dengan status code sedia ada (selain 200)
-    let statusCode = res.statusCode === 200 ? 500 : res.statusCode;
-    let message = err.message;
+    let error = { ...err };
+    error.message = err.message;
 
-    // Khusus untuk Mongoose CastError (cth., ID objek tidak sah)
-    if (err.name === 'CastError' && err.kind === 'ObjectId') {
-        statusCode = 404;
-        message = 'Sumber tidak ditemui (ID tidak sah)';
+    // Log error untuk development
+    console.error(err);
+
+    // Mongoose bad ObjectId
+    if (err.name === 'CastError') {
+        const message = 'Resource not found';
+        error = { message, statusCode: 404 };
     }
-    
-    // Khusus untuk Mongoose ValidationError
+
+    // Mongoose duplicate key
+    if (err.code === 11000) {
+        const message = 'Duplicate field value entered';
+        error = { message, statusCode: 400 };
+    }
+
+    // Mongoose validation error
     if (err.name === 'ValidationError') {
-        statusCode = 400; // Bad Request
-        // Gabungkan mesej ralat validasi
-        message = Object.values(err.errors).map(val => val.message).join(', ');
+        const message = Object.values(err.errors).map(val => val.message);
+        error = { message, statusCode: 400 };
     }
 
-    // Khusus untuk Mongoose Duplicate Key Error
-     if (err.code === 11000) {
-        statusCode = 400; // Bad Request
-        const field = Object.keys(err.keyValue)[0];
-        message = `${field.charAt(0).toUpperCase() + field.slice(1)} sudah wujud.`;
-    }
-
-    res.status(statusCode).json({
-        message: message,
-        // Hanya sertakan stack trace jika dalam mod development
-        stack: process.env.NODE_ENV === 'production' ? null : err.stack,
+    res.status(error.statusCode || 500).json({
+        success: false,
+        error: error.message || 'Server Error'
     });
 };
 

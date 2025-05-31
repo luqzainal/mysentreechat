@@ -52,26 +52,61 @@ const campaignSchema = new mongoose.Schema({
     type: String,
     required: false // Boleh jadi mesej sahaja tanpa kapsyen jika tiada media
   },
-  aiAgentTraining: {
+  // Field untuk AI Chatbot
+  status: {
     type: String,
-    required: false
+    enum: ['enable', 'disable'],
+    default: 'enable'
   },
-  useAI: {
+  isNotMatchDefaultResponse: {
     type: Boolean,
     default: false
   },
-  presenceDelay: {
+  sendTo: {
     type: String,
-    enum: ['typing', 'recording', 'none'],
-    default: 'typing'
+    enum: ['all', 'group', 'individual'],
+    default: 'all'
   },
-  sentCount: {
-    type: Number,
-    default: 0
+  type: {
+    type: String,
+    enum: ['message_contains_keyword', 'message_contains_regex', 'message_contains_ai'],
+    default: 'message_contains_keyword'
   },
-  failedCount: {
-    type: Number,
-    default: 0
+  description: {
+    type: String
+  },
+  keywords: {
+    type: [String],
+    default: []
+  },
+  nextBotAction: {
+    type: String
+  },
+  presenceDelayTime: {
+    type: String
+  },
+  presenceDelayStatus: {
+    type: String,
+    enum: ['enable', 'disable'],
+    default: 'disable'
+  },
+  saveData: {
+    type: String,
+    enum: ['no_save_response', 'save_response', 'save_to_database'],
+    default: 'no_save_response'
+  },
+  apiRestDataStatus: {
+    type: String,
+    enum: ['enabled', 'disabled'],
+    default: 'disabled'
+  },
+  useAiFeature: {
+    type: String,
+    enum: ['not_use_ai', 'use_ai'],
+    default: 'not_use_ai'
+  },
+  aiSpintax: {
+    type: String
   },
   // BARU: Untuk kempen pukal, simpan ID kumpulan kenalan yang digunakan
   contactGroupId: {
@@ -104,6 +139,65 @@ const campaignSchema = new mongoose.Schema({
   campaignScheduleDetails: { // Boleh jadi objek atau string JSON untuk simpan detail jadual
     type: mongoose.Schema.Types.Mixed,
     default: null
+  },
+  sentCount: {
+    type: Number,
+    default: 0
+  },
+  failedCount: {
+    type: Number,
+    default: 0
+  },
+  // Field baru untuk AI
+  aiModel: {
+    type: String,
+    enum: ['gpt-3.5-turbo', 'gpt-4', 'custom'],
+    default: 'gpt-3.5-turbo'
+  },
+  aiTemperature: {
+    type: Number,
+    min: 0,
+    max: 2,
+    default: 0.7
+  },
+  aiMaxTokens: {
+    type: Number,
+    default: 150
+  },
+  aiSystemPrompt: {
+    type: String
+  },
+  aiContextWindow: {
+    type: Number,
+    default: 10
+  },
+  aiLogs: [{
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    input: String,
+    output: String,
+    tokens: Number,
+    duration: Number
+  }],
+  aiStats: {
+    totalInteractions: {
+      type: Number,
+      default: 0
+    },
+    totalTokens: {
+      type: Number,
+      default: 0
+    },
+    averageResponseTime: {
+      type: Number,
+      default: 0
+    },
+    successRate: {
+      type: Number,
+      default: 0
+    }
   }
 }, {
   timestamps: true
@@ -112,5 +206,6 @@ const campaignSchema = new mongoose.Schema({
 // Indexing
 campaignSchema.index({ userId: 1, deviceId: 1 });
 campaignSchema.index({ userId: 1, campaignType: 1 });
+campaignSchema.index({ 'keywords': 1 }); // Untuk pencarian pantas berdasarkan kata kunci
 
 module.exports = mongoose.model('Campaign', campaignSchema); 

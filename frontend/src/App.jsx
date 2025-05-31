@@ -38,7 +38,6 @@ import {
   LogOut, // Logout
   Bell, // Notifications
   Mail, // Mail (contoh)
-  BotMessageSquare, // App Logo
   ChevronDown, // Dropdown arrow
   Menu, // Icon untuk menu mobile
   ShieldCheck // Ikon untuk Admin
@@ -91,11 +90,11 @@ const Header = () => {
 
   return (
     // Header kini fixed top, left 0, right 0
-    <header className="fixed top-0 left-0 right-0 h-16 flex items-center justify-between px-4 sm:px-6 bg-card border-b border-border z-10">
+    <header className="fixed top-0 left-0 right-0 h-16 flex items-center justify-between px-4 sm:px-6 bg-[#484ffc] border-b border-border z-10">
       <div className="flex items-center space-x-4">
         {/* Logo */} 
-        <Link to="/" className="flex items-center space-x-2 text-primary font-semibold">
-          <BotMessageSquare size={28} />
+        <Link to="/" className="flex items-center space-x-2 text-white font-semibold">
+          <img src="/logo.png" alt="Logo" className="h-8" />
           <span className="hidden sm:inline">AI Chatbot</span>
         </Link>
 
@@ -108,8 +107,8 @@ const Header = () => {
               className={({ isActive }) =>
                 `inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${ 
                   isActive 
-                    ? 'bg-accent text-accent-foreground' 
-                    : 'text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground'
+                    ? 'bg-white/20 text-white' 
+                    : 'text-white/80 hover:bg-white/20 hover:text-white'
                 }`
               }
             >
@@ -184,7 +183,7 @@ const Header = () => {
                 <SheetContent side="left" className="w-64 p-4">
                     {/* Logo dalam Sheet */}
                      <Link to="/" className="flex items-center space-x-2 text-primary font-semibold mb-6">
-                       <BotMessageSquare size={28} />
+                       <img src="/logo.png" alt="Logo" className="h-8" />
                        <span>AI Chatbot</span>
                      </Link>
                      {/* Navigasi dalam Sheet */} 
