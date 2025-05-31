@@ -21,10 +21,17 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new Error('Pengguna sudah wujud'); // Guna error handler
   }
 
+  // Semak jika ini adalah pengguna pertama
+  const userCount = await User.countDocuments();
+  const isFirstUser = userCount === 0;
+
   const user = await User.create({
     name,
     email,
     password,
+    role: isFirstUser ? 'admin' : 'user', // Jadikan admin jika pengguna pertama
+    isAdmin: isFirstUser, // Set isAdmin juga untuk pengguna pertama
+    membershipPlan: isFirstUser ? 'Premium' : 'Standard', // Set membershipPlan juga untuk pengguna pertama
   });
 
   if (user) {
