@@ -27,6 +27,9 @@ const { notFound, errorHandler } = require('./middleware/errorMiddleware.js');
 const mongoose = require('mongoose');
 const User = require('./models/User');
 const WhatsappDevice = require('./models/WhatsappDevice');
+const crypto = require('crypto');
+global.crypto = crypto;
+
 // const baileysService = require('./services/baileysService.js'); // Import ini tidak diperlukan kerana kita guna destructuring di atas
 // const { verifyToken } = require('./utils/authUtils.js'); // Fail tidak wujud
 
@@ -217,7 +220,7 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => console.log(`Pelayan (termasuk WebSocket) berjalan pada port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Pelayan (termasuk WebSocket) berjalan pada port ${PORT}`));
 
 // Export io untuk digunakan di tempat lain
 module.exports = { io };
