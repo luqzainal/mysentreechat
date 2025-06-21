@@ -95,7 +95,7 @@ const Header = () => {
         {/* Logo */} 
         <Link to="/" className="flex items-center space-x-2 text-white font-semibold">
           <img src="/logo.png" alt="Logo" className="h-8" />
-          <span className="hidden sm:inline">AI Chatbot</span>
+          {/* <span className="hidden sm:inline">AI Chatbot</span> */}
         </Link>
 
         {/* Navigasi Utama - Tersembunyi pada mobile, tunjuk pada skrin besar */} 

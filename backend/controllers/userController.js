@@ -41,7 +41,7 @@ const registerUser = asyncHandler(async (req, res) => {
     password,
     role: isFirstUser ? 'admin' : 'user', // Jadikan admin jika pengguna pertama
     isAdmin: isFirstUser, // Set isAdmin juga untuk pengguna pertama
-    membershipPlan: isFirstUser ? 'Premium' : 'Standard', // Set membershipPlan juga untuk pengguna pertama
+    membershipPlan: isFirstUser ? 'Pro' : 'Free', // Set membershipPlan juga untuk pengguna pertama
   });
 
   if (user) {
