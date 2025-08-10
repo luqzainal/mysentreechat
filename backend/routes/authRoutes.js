@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();   
 const User = require('../models/User.js');
-const generateToken = require('../utils/generateToken.js');
-const { protect } = require('../middleware/authMiddleware.js');
+const { generateToken, generateTokens } = require('../utils/generateToken.js');
+const { protect, refreshToken } = require('../middleware/authMiddleware.js');
 
 // @desc    Register a new user
 // @route   POST /api/auth/register
@@ -32,13 +32,15 @@ router.post('/register', async (req, res) => {
 
         // Jika berjaya cipta, kembalikan data pengguna dan token
         if (user) {
+            const tokens = generateTokens(user._id);
             res.status(201).json({
                 _id: user._id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
                 plan: user.plan,
-                token: generateToken(user._id),
+                accessToken: tokens.accessToken,
+                refreshToken: tokens.refreshToken,
             });
         } else {
             res.status(400).json({ message: 'Invalid user data' });
@@ -72,13 +74,15 @@ router.post('/login', async (req, res) => {
         // Semak jika pengguna wujud dan password sepadan
         if (user && (await user.matchPassword(password))) {
             // Jika sepadan, hantar data pengguna dan token
+            const tokens = generateTokens(user._id);
             res.json({
                 _id: user._id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
                 plan: user.plan,
-                token: generateToken(user._id),
+                accessToken: tokens.accessToken,
+                refreshToken: tokens.refreshToken,
             });
         } else {
             // Jika tidak wujud atau password salah
@@ -110,5 +114,10 @@ router.get('/me', protect, async (req, res) => {
          res.status(404).json({ message: 'User not found' }); // Sepatutnya tidak berlaku jika protect berjaya
      }
 });
+
+// @desc    Refresh access token
+// @route   POST /api/auth/refresh
+// @access  Public
+router.post('/refresh', refreshToken);
 
 module.exports = router; 

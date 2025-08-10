@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken'); // Tukar ke require untuk konsistensi
 // Tukar import asyncHandler kepada require
 const asyncHandler = require('../middleware/asyncHandler.js');
 // Tukar import generateToken kepada require jika utils adalah CommonJS
-const generateToken = require('../utils/generateToken.js');
+const { generateToken, generateTokens } = require('../utils/generateToken.js');
 
 // Fungsi untuk menjana kata laluan rawak
 const generateRandomPassword = (length = 12) => {
@@ -45,13 +45,15 @@ const registerUser = asyncHandler(async (req, res) => {
   });
 
   if (user) {
+    const tokens = generateTokens(user._id);
     res.status(201).json({
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
       membershipPlan: user.membershipPlan,
-      token: generateToken(user._id),
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     });
   } else {
     res.status(400);
@@ -139,13 +141,15 @@ const loginUser = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email }).select('+password'); // Pilih password untuk banding
 
   if (user && (await user.matchPassword(password))) {
+    const tokens = generateTokens(user._id);
     res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
       membershipPlan: user.membershipPlan,
-      token: generateToken(user._id),
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     });
   } else {
     res.status(401); // Unauthorized
@@ -191,13 +195,15 @@ const updateUserProfile = asyncHandler(async (req, res) => {
 
     const updatedUser = await user.save();
 
+     const tokens = generateTokens(updatedUser._id);
      res.json({
       _id: updatedUser._id,
       name: updatedUser.name,
       email: updatedUser.email,
       role: updatedUser.role,
       membershipPlan: updatedUser.membershipPlan,
-      token: generateToken(updatedUser._id),
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     });
 
   } else {

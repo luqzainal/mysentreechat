@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User.js');
+const { verifyRefreshToken } = require('../utils/refreshToken');
+const { generateTokens } = require('../utils/generateToken');
 
 // Middleware untuk melindungi route
 const protect = async (req, res, next) => {
@@ -47,4 +49,33 @@ const admin = (req, res, next) => {
   }
 };
 
-module.exports = { protect, admin }; 
+// Middleware untuk refresh token
+const refreshToken = async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(401).json({ message: 'Refresh token required' });
+  }
+
+  try {
+    const decoded = verifyRefreshToken(refreshToken);
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const tokens = generateTokens(user._id);
+    
+    res.json({
+      success: true,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken
+    });
+  } catch (error) {
+    console.error('Refresh token error:', error.message);
+    res.status(403).json({ message: 'Invalid refresh token' });
+  }
+};
+
+module.exports = { protect, admin, refreshToken }; 
