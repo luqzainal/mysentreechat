@@ -9,7 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Wifi, WifiOff, QrCode as QrCodeIcon, Loader2, Link as LinkIcon, XCircle, Smartphone, Trash2, Power } from 'lucide-react'; // Import ikon
 import api from '../services/api'; // BARU: Import api
 
-const SOCKET_SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
+const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
 let socket = null; // Define socket outside component
 
 // Contoh data peranti (gantikan dengan API)
@@ -73,8 +76,13 @@ function ScanDevicePage() {
         console.log("[ScanDevicePage] Disconnecting existing socket before creating a new one.");
         socket.disconnect();
     }
-    console.log("[ScanDevicePage] Attempting to connect socket...");
-    socket = io(SOCKET_SERVER_URL, { query: { userId: user._id } });
+    console.log("[ScanDevicePage] Attempting to connect socket to:", SOCKET_SERVER_URL);
+    socket = io(SOCKET_SERVER_URL, { 
+      query: { userId: user._id },
+      transports: ['websocket', 'polling'],
+      timeout: 20000,
+      forceNew: true
+    });
 
     socket.on('connect', () => {
       console.log("[ScanDevicePage] Socket.IO Connected, ID:", socket.id);
@@ -225,7 +233,10 @@ function ScanDevicePage() {
 
   return (
     <div className="container mx-auto p-4 space-y-6">
-      <h1 className="text-3xl font-bold">Scan Device</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Scan Device</h1>
+        <RefreshButton onRefresh={fetchDevices} position="relative" />
+      </div>
 
       {/* Kad untuk Imbas QR & Status Semasa */}
       <Card className="max-w-2xl mx-auto">

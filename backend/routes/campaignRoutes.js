@@ -79,7 +79,24 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
     maxIntervalSeconds,
     campaignScheduleType,
     campaignScheduleDetails,
-    mediaAttachments // Array of media IDs from library
+    mediaAttachments, // Array of media IDs from library
+    // AI Chatbot specific fields
+    status,
+    isNotMatchDefaultResponse,
+    sendTo,
+    type,
+    name,
+    description,
+    keywords,
+    nextBotAction,
+    presenceDelayTime,
+    presenceDelayStatus,
+    saveData,
+    apiRestDataStatus,
+    mediaFileAi,
+    captionAi,
+    useAiFeature,
+    aiSpintax
   } = req.body;
 
   // Log input untuk debugging
@@ -87,36 +104,68 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
   // console.log("Request File:", req.file);
   // console.log("Received mediaAttachments:", mediaAttachments);
 
-  if (!campaignName) {
-      return res.status(400).json({ message: 'Campaign name is required' });
+  // Validate based on campaign type
+  if (campaignType === 'bulk') {
+    if (!campaignName) {
+      return res.status(400).json({ message: 'Campaign name is required for bulk campaigns' });
+    }
+    if (!contactGroupId) {
+      return res.status(400).json({ message: 'Contact Group ID is required for bulk campaigns' });
+    }
+  } else if (campaignType === 'ai_chatbot') {
+    if (!name) {
+      return res.status(400).json({ message: 'Name is required for AI chatbot campaigns' });
+    }
+    if (!captionAi) {
+      return res.status(400).json({ message: 'Caption/Text Message is required for AI chatbot campaigns' });
+    }
+  } else if (!campaignName) {
+    return res.status(400).json({ message: 'Campaign name is required' });
   }
+  
   if (campaignType && !['bulk', 'ai_chatbot'].includes(campaignType)) {
       return res.status(400).json({ message: 'Invalid campaignType. Must be bulk or ai_chatbot.' });
-  }
-  if (campaignType === 'bulk' && !contactGroupId) {
-      return res.status(400).json({ message: 'Contact Group ID is required for bulk campaigns.' });
   }
 
   try {
     const newCampaignData = {
       userId: req.user.id,
       deviceId: deviceId,
-      campaignName,
-      campaignType: campaignType || (useAI === 'true' ? 'ai_chatbot' : 'bulk'), // Default type logic
-      statusEnabled: statusEnabled === 'true',
-      enableLink: enableLink === 'true',
-      urlLink: enableLink === 'true' ? urlLink : '',
-      caption,
-      aiAgentTraining,
-      useAI: useAI === 'true',
-      presenceDelay,
+      campaignType: campaignType || 'bulk', // Default type logic
       sentCount: 0, 
       failedCount: 0,
       mediaAttachments: [] // Inisialisasi sebagai array kosong
     };
 
+    // Add fields based on campaign type
     if (campaignType === 'bulk') {
-        newCampaignData.contactGroupId = contactGroupId;
+      newCampaignData.campaignName = campaignName;
+      newCampaignData.statusEnabled = statusEnabled === 'true';
+      newCampaignData.enableLink = enableLink === 'true';
+      newCampaignData.urlLink = enableLink === 'true' ? urlLink : '';
+      newCampaignData.caption = caption;
+      newCampaignData.contactGroupId = contactGroupId;
+    } else if (campaignType === 'ai_chatbot') {
+      newCampaignData.name = name;
+      newCampaignData.campaignName = name; // Fallback for compatibility
+      newCampaignData.status = status || 'enable';
+      newCampaignData.isNotMatchDefaultResponse = isNotMatchDefaultResponse === 'yes';
+      newCampaignData.sendTo = sendTo || 'all';
+      newCampaignData.type = type || 'message_contains_keyword';
+      newCampaignData.description = description;
+      newCampaignData.keywords = keywords ? (typeof keywords === 'string' ? keywords.split(',').map(k => k.trim()) : keywords) : [];
+      newCampaignData.nextBotAction = nextBotAction;
+      newCampaignData.presenceDelayTime = presenceDelayTime;
+      newCampaignData.presenceDelayStatus = presenceDelayStatus || 'disable';
+      newCampaignData.saveData = saveData || 'no_save_response';
+      newCampaignData.apiRestDataStatus = apiRestDataStatus || 'disabled';
+      newCampaignData.captionAi = captionAi;
+      newCampaignData.useAiFeature = useAiFeature || 'not_use_ai';
+      newCampaignData.aiSpintax = aiSpintax;
+    }
+
+    // Add bulk-specific scheduling fields
+    if (campaignType === 'bulk') {
         if (scheduledAt) newCampaignData.scheduledAt = new Date(scheduledAt);
         if (minIntervalSeconds) newCampaignData.minIntervalSeconds = parseInt(minIntervalSeconds, 10);
         if (maxIntervalSeconds) newCampaignData.maxIntervalSeconds = parseInt(maxIntervalSeconds, 10);
@@ -151,25 +200,49 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
     // Kendalikan media dari pustaka (mediaAttachments) atau fail yang dimuat naik (req.file)
     let finalMediaAttachmentIds = [];
 
-    if (mediaAttachments && Array.isArray(mediaAttachments) && mediaAttachments.length > 0) {
-        // Sahkan semua ID media dan pastikan ia milik pengguna
-        const validUserMedia = await Media.find({ 
-            _id: { $in: mediaAttachments }, 
-            user: req.user.id 
-        }).select('_id');
-        
-        finalMediaAttachmentIds = validUserMedia.map(media => media._id);
+    // Log untuk debugging
+    console.log('Received mediaAttachments:', mediaAttachments);
+    console.log('Type of mediaAttachments:', typeof mediaAttachments);
+    console.log('Is Array:', Array.isArray(mediaAttachments));
 
-        if (finalMediaAttachmentIds.length !== mediaAttachments.length) {
-            // Tidak semua mediaId yang dihantar adalah sah atau milik pengguna
-            // Mungkin log amaran atau hantar ralat separa? Buat masa ini kita guna yang sah sahaja.
-            console.warn(`Beberapa ID media tidak sah atau bukan milik pengguna ${req.user.id}. Hanya ID yang sah akan digunakan.`);
-            // Jika fail turut dimuat naik, padamkannya kerana kita utamakan dari pustaka jika ada
-            if (req.file && req.file.path) {
-                const fs = require('fs');
-                fs.unlink(req.file.path, (err) => {
-                    if (err) console.error("Error deleting redundant uploaded file (library selection took precedence):", err);
-                });
+    if (mediaAttachments) {
+        // Handle different formats of mediaAttachments
+        let mediaIds = [];
+        
+        if (Array.isArray(mediaAttachments)) {
+            mediaIds = mediaAttachments;
+        } else if (typeof mediaAttachments === 'string') {
+            try {
+                mediaIds = JSON.parse(mediaAttachments);
+            } catch (e) {
+                // If it's a single ID as string
+                mediaIds = [mediaAttachments];
+            }
+        } else {
+            // If it's a single value
+            mediaIds = [mediaAttachments];
+        }
+
+        console.log('Processed mediaIds:', mediaIds);
+
+        if (mediaIds.length > 0) {
+            // Sahkan semua ID media dan pastikan ia milik pengguna
+            const validUserMedia = await Media.find({ 
+                _id: { $in: mediaIds }, 
+                user: req.user.id 
+            }).select('_id');
+            
+            finalMediaAttachmentIds = validUserMedia.map(media => media._id);
+
+            if (finalMediaAttachmentIds.length !== mediaIds.length) {
+                console.warn(`Beberapa ID media tidak sah atau bukan milik pengguna ${req.user.id}. Hanya ID yang sah akan digunakan.`);
+                // Jika fail turut dimuat naik, padamkannya kerana kita utamakan dari pustaka jika ada
+                if (req.file && req.file.path) {
+                    const fs = require('fs');
+                    fs.unlink(req.file.path, (err) => {
+                        if (err) console.error("Error deleting redundant uploaded file (library selection took precedence):", err);
+                    });
+                }
             }
         }
     } else if (req.file) {

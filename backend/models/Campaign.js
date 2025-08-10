@@ -16,7 +16,28 @@ const campaignSchema = new mongoose.Schema({
   },
   campaignName: {
     type: String,
-    required: [true, 'Campaign name is required']
+    required: function() {
+      // campaignName is required for bulk campaigns
+      // For AI chatbot, it's optional (we use 'name' field instead)
+      return this.campaignType === 'bulk';
+    }
+  },
+  // AI Chatbot specific name field
+  name: {
+    type: String,
+    required: function() {
+      return this.campaignType === 'ai_chatbot';
+    },
+    validate: {
+      validator: function(value) {
+        // If this is an AI chatbot campaign, name must not be empty
+        if (this.campaignType === 'ai_chatbot') {
+          return value && value.trim().length > 0;
+        }
+        return true;
+      },
+      message: 'Name is required and cannot be empty for AI chatbot campaigns'
+    }
   },
   campaignType: {
     type: String,
@@ -52,6 +73,23 @@ const campaignSchema = new mongoose.Schema({
     type: String,
     required: false // Boleh jadi mesej sahaja tanpa kapsyen jika tiada media
   },
+  // AI Chatbot specific caption field
+  captionAi: {
+    type: String,
+    required: function() {
+      return this.campaignType === 'ai_chatbot';
+    },
+    validate: {
+      validator: function(value) {
+        // If this is an AI chatbot campaign, captionAi must not be empty
+        if (this.campaignType === 'ai_chatbot') {
+          return value && value.trim().length > 0;
+        }
+        return true;
+      },
+      message: 'Caption/Text Message is required and cannot be empty for AI chatbot campaigns'
+    }
+  },
   // Field untuk AI Chatbot
   status: {
     type: String,
@@ -69,7 +107,7 @@ const campaignSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['message_contains_keyword', 'message_contains_regex', 'message_contains_ai'],
+    enum: ['message_contains_keyword', 'message_contains_whole_keyword', 'message_contains_regex', 'message_contains_ai'],
     default: 'message_contains_keyword'
   },
   description: {
@@ -87,12 +125,12 @@ const campaignSchema = new mongoose.Schema({
   },
   presenceDelayStatus: {
     type: String,
-    enum: ['enable', 'disable'],
+    enum: ['disable', 'enable_typing', 'enable_recording'],
     default: 'disable'
   },
   saveData: {
     type: String,
-    enum: ['no_save_response', 'save_response', 'save_to_database'],
+    enum: ['no_save_response', 'response_is_saved', 'save_to_database'],
     default: 'no_save_response'
   },
   apiRestDataStatus: {

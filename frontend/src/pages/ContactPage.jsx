@@ -39,8 +39,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"; // Import Card
-import { Trash2, Upload, FileText, Users, PlusCircle, Edit3, XCircle, UserMinus } from 'lucide-react'; // Tambah Edit3, XCircle, UserMinus
+import { Trash2, Upload, FileText, Users, PlusCircle, Edit3, XCircle, UserMinus, Download } from 'lucide-react'; // Tambah Edit3, XCircle, UserMinus, Download
 import { Badge } from "@/components/ui/badge"; // Import Badge
+
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+// Import Excel Templates
+import { generateContactTemplate, validateExcelFile } from '../utils/excelTemplates';
 import {
   Select,
   SelectContent,
@@ -275,11 +280,35 @@ function ContactPage() {
     }
 
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('groupId', selectedGroupId); // Hantar groupId yang dipilih
 
     try {
+      // Validate Excel file first
+      toast({
+        title: "Validating File...",
+        description: "Checking Excel file format and data...",
+      });
+
+      const validation = await validateExcelFile(selectedFile);
+      
+      if (!validation.isValid) {
+        toast({
+          title: "File Validation Failed",
+          description: `Found ${validation.errors.length} error(s): ${validation.errors.slice(0, 3).join(', ')}${validation.errors.length > 3 ? '...' : ''}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Show validation summary
+      toast({
+        title: "File Validated",
+        description: `Found ${validation.validRowCount} valid contacts out of ${validation.totalRows} rows.`,
+      });
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('groupId', selectedGroupId); // Hantar groupId yang dipilih
+
       const config = {
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -294,9 +323,27 @@ function ContactPage() {
         description: responseData.message, 
       });
 
+      // Show detailed summary if available
+      if (responseData.summary) {
+        console.log("Upload Summary:", responseData.summary);
+        if (responseData.summary.errorCount > 0) {
+          toast({
+            title: "Upload Summary",
+            description: `${responseData.summary.successfullyCreated} created, ${responseData.summary.errorCount} errors.`,
+            variant: "default",
+          });
+        }
+      }
+
       if (responseData.errors && responseData.errors.length > 0) {
           console.warn("Errors during import:", responseData.errors);
-          // ... toast error sedia ada ...
+          // Show first few errors to user
+          const errorPreview = responseData.errors.slice(0, 3).join('\n');
+          toast({
+            title: "Some Issues Found",
+            description: `${responseData.errors.length} issue(s):\n${errorPreview}${responseData.errors.length > 3 ? '\n...' : ''}`,
+            variant: "destructive",
+          });
       }
 
       setIsUploadDialogOpen(false);
@@ -305,7 +352,20 @@ function ContactPage() {
       fetchContactGroups(); // Refresh juga senarai group untuk update count
 
     } catch (err) {
-      // ... error handling sedia ada ...
+      console.error("Error during upload:", err);
+      let errorMessage = "Failed to upload contacts.";
+      
+      if (err.message && err.message.includes('Failed to read Excel file')) {
+        errorMessage = "Invalid Excel file format. Please check your file and try again.";
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      }
+      
+      toast({
+        title: "Upload Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsUploading(false);
     }
@@ -374,11 +434,17 @@ function ContactPage() {
     setIsRemoveContactDialogOpen(true);
   };
 
+  const refreshData = () => {
+    fetchContacts();
+    fetchContactGroups();
+  };
+
   return (
     <div className="space-y-6">
       <Toaster />
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Manage Contacts</h1>
+        <RefreshButton onRefresh={refreshData} position="relative" />
       </div>
 
       {/* Bahagian Upload dan Kumpulan Kenalan */}
@@ -455,7 +521,25 @@ function ContactPage() {
 
             {/* Bahagian Kanan: Upload dan Tambah Manual */}
             <div className="space-y-4">
-              <h3 className="font-semibold">Add Contacts</h3>
+              <div className="flex justify-between items-center">
+                <h3 className="font-semibold">Add Contacts</h3>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => generateContactTemplate('xlsx')}
+                  >
+                    <Download className="mr-2 h-4 w-4" /> Excel (.xlsx)
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => generateContactTemplate('xls')}
+                  >
+                    <Download className="mr-2 h-4 w-4" /> Excel (.xls)
+                  </Button>
+                </div>
+              </div>
               <div className="flex flex-col space-y-2">
                 <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                   <DialogTrigger asChild>
@@ -522,6 +606,8 @@ function ContactPage() {
                       <DialogTitle>Upload Contacts</DialogTitle>
                       <DialogDescription>
                         Select a contact group and an Excel file (.xlsx or .xls) to upload your contacts.
+                        <br /><span className="text-sm text-muted-foreground mt-1 block">Required columns: Name, Phone (download template above for exact format)</span>
+                        <br /><span className="text-sm text-yellow-600 mt-1 block">⚠️ Only Excel files (.xlsx, .xls) are supported</span>
                       </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
@@ -561,8 +647,8 @@ function ContactPage() {
                             type="file" 
                             ref={fileInputRef} 
                             onChange={handleFileChange} 
-                            className="hidden" 
-                            accept=".xlsx, .xls"
+                            accept=".xlsx,.xls"
+                            className="hidden"
                           />
                         </div>
                       </div>

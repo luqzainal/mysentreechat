@@ -3,37 +3,42 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { Loader2, CheckCircle2, XCircle, Zap, Eye, EyeOff } from 'lucide-react';
 import api from '../services/api'; // Import API service
 import { useAuth } from '../contexts/AuthContext';
+
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
 
 function SettingsPage() {
   const { user } = useAuth();
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testMessage, setTestMessage] = useState('');
+  const [testResult, setTestResult] = useState(null);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [lastTestStatus, setLastTestStatus] = useState(null);
 
-  // TODO: Fetch existing settings (API key) when component mounts
   useEffect(() => {
       const fetchSettings = async () => {
         setIsLoading(true);
-        /* Replace with actual API call
         try {
-           // Assume endpoint /settings/ai or similar
            const response = await api.get('/settings/ai'); 
            setOpenaiApiKey(response.data.openaiApiKey || '');
+           if (response.data.openaiApiKey) {
+             setLastTestStatus('saved');
+           }
          } catch (error) {
            console.error("Failed to fetch AI settings:", error);
-           // Don't necessarily need a toast here unless it's critical
+           toast.error("Failed to load AI settings");
          } finally {
            setIsLoading(false);
          }
-         */
-         // Simulation
-         setTimeout(() => {
-             // setOpenaiApiKey('sk-xxxxxxxxxxxxxxxxx'); // Simulate fetching existing key
-             setIsLoading(false);
-         }, 500);
        };
 
       if(user) {
@@ -43,14 +48,18 @@ function SettingsPage() {
   }, [user]);
 
   const handleSaveSettings = async () => {
+    if (!openaiApiKey || !openaiApiKey.startsWith('sk-')) {
+      toast.error("Please enter a valid OpenAI API key (starts with 'sk-')");
+      return;
+    }
+
     setIsSaving(true);
     toast.info("Saving AI settings...");
 
-    // TODO: Implement API call to save the OpenAI API key
-    /*
     try {
       await api.put('/settings/ai', { openaiApiKey });
       toast.success("AI settings saved successfully.");
+      setLastTestStatus('saved');
     } catch (error) {
        console.error("Failed to save AI settings:", error);
        const errorMessage = error.response?.data?.message || "Error saving settings.";
@@ -58,58 +67,289 @@ function SettingsPage() {
     } finally {
       setIsSaving(false);
     }
-    */
+  };
 
-    // Simulation
-    setTimeout(() => {
-        toast.success("AI settings saved successfully! (Simulation)");
-        setIsSaving(false);
-    }, 1000);
+  const handleTestConnection = async () => {
+    const keyToTest = openaiApiKey.trim();
+    if (!keyToTest) {
+      toast.error("Please enter an API key to test");
+      return;
+    }
+
+    if (!keyToTest.startsWith('sk-')) {
+      toast.error("Invalid API key format. OpenAI keys start with 'sk-'");
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+    toast.info("Testing API connection...");
+
+    try {
+      const response = await api.post('/settings/ai/test', {
+        apiKey: keyToTest,
+        testMessage: testMessage || undefined
+      });
+
+      if (response.data.success) {
+        setTestResult({
+          success: true,
+          message: response.data.message,
+          data: response.data.data
+        });
+        setLastTestStatus('success');
+        toast.success("🎉 API connection successful!");
+        
+        // Load available models
+        try {
+          const modelsResponse = await api.get('/settings/ai/models');
+          if (modelsResponse.data.success) {
+            setAvailableModels(modelsResponse.data.models);
+          }
+        } catch (modelError) {
+          console.error("Failed to fetch models:", modelError);
+        }
+      }
+    } catch (error) {
+      console.error("API test failed:", error);
+      const errorData = error.response?.data;
+      const errorMessage = errorData?.message || "Connection test failed";
+      
+      setTestResult({
+        success: false,
+        message: errorMessage,
+        errorCode: errorData?.errorCode,
+        details: errorData?.details
+      });
+      setLastTestStatus('error');
+      
+      if (errorData?.errorCode === 'INVALID_API_KEY') {
+        toast.error("❌ Invalid API key. Please check your OpenAI key.");
+      } else if (errorData?.errorCode === 'INSUFFICIENT_CREDITS') {
+        toast.error("💳 Insufficient credits. Please check your OpenAI billing.");
+      } else if (errorData?.errorCode === 'RATE_LIMIT_EXCEEDED') {
+        toast.error("⏱️ Rate limit exceeded. Try again later.");
+      } else {
+        toast.error(`❌ ${errorMessage}`);
+      }
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const getStatusIcon = () => {
+    switch (lastTestStatus) {
+      case 'success':
+        return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+      case 'error':
+        return <XCircle className="h-4 w-4 text-red-600" />;
+      case 'saved':
+        return <CheckCircle2 className="h-4 w-4 text-blue-600" />;
+      default:
+        return null;
+    }
   };
 
   if (isLoading) {
       return <div className="container mx-auto p-4">Loading settings...</div>;
   }
 
+  const refreshSettings = () => {
+    window.location.reload();
+  };
+
   return (
     <div className="container mx-auto p-4 space-y-6">
-      <h1 className="text-3xl font-bold">Settings</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Settings</h1>
+        <RefreshButton onRefresh={refreshSettings} position="relative" />
+      </div>
 
-      <Card className="max-w-2xl">
+      <Card className="max-w-4xl">
         <CardHeader>
-          <CardTitle>AI Configuration</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="h-5 w-5 text-orange-500" />
+            AI Configuration
+            {getStatusIcon()}
+          </CardTitle>
           <CardDescription>
-            Manage your OpenAI API key for AI features.
+            Manage your OpenAI API key for AI chatbot features. Test your connection to ensure everything works properly.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
+          {/* API Key Input Section */}
           <div className="space-y-2">
-            <Label htmlFor="openaiApiKey">OpenAI API Key</Label>
-            <Input
-              id="openaiApiKey"
-              name="openaiApiKey"
-              type="password"
-              placeholder="Enter your OpenAI API key (e.g., sk-...)"
-              value={openaiApiKey}
-              onChange={(e) => setOpenaiApiKey(e.target.value)}
-              disabled={isSaving}
-            />
+            <Label htmlFor="openaiApiKey" className="flex items-center gap-2">
+              OpenAI API Key
+              <span className="text-red-500">*</span>
+            </Label>
+            <div className="relative">
+              <Input
+                id="openaiApiKey"
+                name="openaiApiKey"
+                type={showApiKey ? "text" : "password"}
+                placeholder="Enter your OpenAI API key (e.g., sk-...)"
+                value={openaiApiKey}
+                onChange={(e) => {
+                  setOpenaiApiKey(e.target.value);
+                  setTestResult(null);
+                  setLastTestStatus(null);
+                }}
+                disabled={isSaving || isTesting}
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1 h-8 w-8 p-0"
+                onClick={() => setShowApiKey(!showApiKey)}
+              >
+                {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
             <p className="text-sm text-muted-foreground">
-              Your API key is stored securely. Get your key from the{' '}
-              <a href="https://platform.openai.com/account/api-keys" target="_blank" rel="noopener noreferrer" className="underline">
-                OpenAI website
+              Your API key is stored securely. Get your key from{' '}
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline text-blue-600">
+                OpenAI Dashboard
               </a>.
             </p>
           </div>
+
+          {/* Test Connection Section */}
+          <div className="border rounded-lg p-4 bg-slate-50">
+            <h3 className="font-semibold mb-3">Test API Connection</h3>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="testMessage">Custom Test Message (Optional)</Label>
+                <Textarea
+                  id="testMessage"
+                  placeholder="Enter a custom message to test the AI response (leave blank for default test)"
+                  value={testMessage}
+                  onChange={(e) => setTestMessage(e.target.value)}
+                  rows={2}
+                  disabled={isTesting}
+                />
+              </div>
+              <Button 
+                onClick={handleTestConnection} 
+                disabled={isTesting || !openaiApiKey}
+                variant="outline"
+                className="w-full"
+              >
+                {isTesting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Testing Connection...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Test API Connection
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Test Results */}
+            {testResult && (
+              <div className={`mt-4 p-4 rounded-md ${testResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {testResult.success ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-red-600" />
+                  )}
+                  <h4 className={`font-semibold ${testResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                    {testResult.success ? 'Connection Successful!' : 'Connection Failed'}
+                  </h4>
+                </div>
+                <p className={`text-sm ${testResult.success ? 'text-green-700' : 'text-red-700'}`}>
+                  {testResult.message}
+                </p>
+                
+                {testResult.success && testResult.data && (
+                  <div className="mt-3 text-xs text-green-600 space-y-1">
+                    <div><strong>AI Response:</strong> {testResult.data.response}</div>
+                    <div><strong>Model:</strong> {testResult.data.model}</div>
+                    <div><strong>Tokens Used:</strong> {testResult.data.tokensUsed}</div>
+                    <div><strong>Response Time:</strong> {testResult.data.responseTime}</div>
+                  </div>
+                )}
+
+                {!testResult.success && testResult.errorCode && (
+                  <div className="mt-2 text-xs text-red-600">
+                    <div><strong>Error Code:</strong> {testResult.errorCode}</div>
+                    {testResult.details && <div><strong>Details:</strong> {testResult.details}</div>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Available Models */}
+            {availableModels.length > 0 && (
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <h4 className="font-semibold text-blue-800 mb-2">Available AI Models</h4>
+                <div className="flex flex-wrap gap-2">
+                  {availableModels.slice(0, 6).map(model => (
+                    <span key={model.id} className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded">
+                      {model.id}
+                    </span>
+                  ))}
+                  {availableModels.length > 6 && (
+                    <span className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded">
+                      +{availableModels.length - 6} more
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </CardContent>
-        <CardFooter>
-          <Button onClick={handleSaveSettings} disabled={isSaving || !openaiApiKey}>
-            {isSaving ? 'Saving...' : 'Save API Key'}
+        <CardFooter className="flex gap-3">
+          <Button 
+            onClick={handleSaveSettings} 
+            disabled={isSaving || !openaiApiKey || isTesting}
+            className="flex-1"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save API Key'
+            )}
+          </Button>
+          
+          <Button 
+            variant="outline" 
+            onClick={handleTestConnection}
+            disabled={isTesting || !openaiApiKey || isSaving}
+          >
+            {isTesting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Zap className="h-4 w-4" />
+            )}
           </Button>
         </CardFooter>
       </Card>
 
-      {/* Boleh tambah Kad Tetapan lain di sini jika perlu */}
+      {/* Usage Guidelines Card */}
+      <Card className="max-w-4xl">
+        <CardHeader>
+          <CardTitle>AI Usage Guidelines</CardTitle>
+          <CardDescription>Important information about using AI features</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <div>• <strong>API Key Security:</strong> Your API key is stored securely and only used for your AI chatbot features.</div>
+          <div>• <strong>Usage Billing:</strong> AI requests will be charged to your OpenAI account based on token usage.</div>
+          <div>• <strong>Model Selection:</strong> GPT-3.5-turbo is recommended for cost-effective operations.</div>
+          <div>• <strong>Rate Limits:</strong> OpenAI has rate limits based on your account tier and usage.</div>
+          <div>• <strong>Content Policy:</strong> Ensure your AI chatbot content complies with OpenAI's usage policies.</div>
+        </CardContent>
+      </Card>
 
     </div>
   );

@@ -11,6 +11,9 @@ import { Input } from "@/components/ui/input"; // Import Input for Search
 import { Search, Paperclip, Bot as BotIcon, Send, PlusCircle, List, Loader2, Settings as SettingsIcon } from 'lucide-react'; // Import icons
 import { Label } from "@/components/ui/label";
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 // // Contoh data DIBUANG - akan dimuat dari API
 // const dummyConnectedNumbers = [
 // ...
@@ -85,6 +88,21 @@ const AutoresponderPage = () => {
     );
   }
 
+  const refreshData = async () => {
+    try {
+      const response = await api.get('/ai-chatbot/devices-summary');
+      const devicesSummary = response.data || [];
+      const filteredData = devicesSummary.filter(device =>
+            (device.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+            (device.number?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+        );
+      setConnectedNumbers(filteredData);
+    } catch (error) {
+      console.error("Failed to refresh AI device summary:", error);
+      toast.error("Failed to refresh data.");
+    }
+  };
+
   return (
     <div className="container mx-auto p-4 space-y-6">
        <div className="flex justify-between items-center mb-6">
@@ -93,6 +111,7 @@ const AutoresponderPage = () => {
               <p className="text-muted-foreground">Manage campaigns and settings for your connected numbers.</p>
             </div>
             <div className="flex items-center space-x-3">
+                <RefreshButton onRefresh={refreshData} position="relative" />
                 <Link to="/settings">
                   <Button variant="outline">
                     <SettingsIcon className="mr-2 h-4 w-4" /> 

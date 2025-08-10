@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 const AccountPage = () => {
   const { user, login } = useAuth(); // Get login function to update user state + token
   const [formData, setFormData] = useState({
@@ -99,8 +102,16 @@ const AccountPage = () => {
     );
   }
 
+  const refreshData = async () => {
+    window.location.reload();
+  };
+
   return (
     <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Account Settings</h1>
+        <RefreshButton onRefresh={refreshData} position="relative" />
+      </div>
       <Card>
         <form onSubmit={handleSubmit}>
           <CardHeader>

@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from 'sonner';
 import api from '../services/api';
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 function CampaignListPage() {
   const { numberId } = useParams();
   const [campaigns, setCampaigns] = useState([]);
@@ -21,7 +24,7 @@ function CampaignListPage() {
       // Guna API call sebenar
       try {
           // Pastikan ID yang digunakan adalah yang betul. Anda mungkin perlu `whatsappDeviceId` atau `_id` dari backend
-          const response = await api.get(`/api/ai-chatbot/${numberId}/campaigns`); 
+          const response = await api.get(`/ai-chatbot/${numberId}/campaigns`); 
           // Jika backend mengembalikan array terus:
           setCampaigns(response.data || []);
           // Jika backend mengembalikan objek dengan property, cth: { campaigns: [...] }
@@ -40,15 +43,18 @@ function CampaignListPage() {
 
   // TODO: Fungsi untuk toggle status kempen
   const handleToggleStatus = async (campaignId, currentStatus) => {
-      const newStatus = currentStatus === 'Enabled' ? 'Disabled' : 'Enabled';
+      // Convert from display format to API format
+      const newStatus = currentStatus === 'Enabled' ? 'disable' : 'enable';
+      const newDisplayStatus = currentStatus === 'Enabled' ? 'Disabled' : 'Enabled';
+      
       setIsUpdating(campaignId);
       toast.info(`Updating status for campaign ${campaignId}...`);
       // Guna API call sebenar
       try {
-          // Pastikan ID kempen yang dihantar adalah _id atau ID yang dijangka backend
-          const response = await api.put(`/api/ai-chatbot/${numberId}/campaigns/${campaignId}/status`, { status: newStatus });
-          // Pastikan anda mengemas kini state berdasarkan ID yang betul (_id?)
-          setCampaigns(prev => prev.map(c => c._id === campaignId ? { ...c, status: response.data.status } : c));
+          // Send API format (enable/disable)
+          await api.put(`/ai-chatbot/${numberId}/campaigns/${campaignId}/status`, { status: newStatus });
+          // Update state with display format (Enabled/Disabled)
+          setCampaigns(prev => prev.map(c => c._id === campaignId ? { ...c, status: newDisplayStatus } : c));
           toast.success("Campaign status updated.");
       } catch (error) {
            console.error("Failed to update campaign status:", error);
@@ -66,7 +72,7 @@ function CampaignListPage() {
        // Guna API call sebenar
        try {
            // Pastikan ID kempen yang dihantar adalah _id atau ID yang dijangka backend
-           await api.delete(`/api/ai-chatbot/${numberId}/campaigns/${campaignId}`);
+           await api.delete(`/ai-chatbot/${numberId}/campaigns/${campaignId}`);
            // Pastikan anda menapis state berdasarkan ID yang betul (_id?)
            setCampaigns(prev => prev.filter(c => c._id !== campaignId));
            toast.success("Campaign deleted successfully.");
@@ -86,6 +92,11 @@ function CampaignListPage() {
     );
   }
 
+  const refreshCampaigns = async () => {
+    const response = await api.get(`/ai-chatbot/${numberId}/campaigns`); 
+    setCampaigns(response.data || []);
+  };
+
   return (
     <div className="container mx-auto p-4 space-y-4">
       <div className="flex justify-between items-center mb-4">
@@ -93,11 +104,14 @@ function CampaignListPage() {
              <h1 className="text-3xl font-bold">Campaign List</h1>
              <p className="text-muted-foreground">Manage campaigns for number ID: {numberId}</p>
          </div>
-        <Button asChild>
-            <Link to={`/ai-chatbot/${numberId}/campaigns/create?type=ai_chatbot`}>
-                <PlusCircle className="mr-2 h-4 w-4" /> Add New Campaign
-            </Link>
-        </Button>
+        <div className="flex gap-2">
+          <RefreshButton onRefresh={refreshCampaigns} position="relative" />
+          <Button asChild>
+              <Link to={`/ai-chatbot/${numberId}/campaigns/create?type=ai_chatbot`}>
+                  <PlusCircle className="mr-2 h-4 w-4" /> Add New Campaign
+              </Link>
+          </Button>
+        </div>
       </div>
 
       <Card>

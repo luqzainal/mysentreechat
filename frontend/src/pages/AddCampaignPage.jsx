@@ -24,6 +24,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { Link } from 'react-router-dom';
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 // Helper function to format date for datetime-local input
 const formatDateForInput = (dateString) => {
   if (!dateString) return '';
@@ -42,7 +45,9 @@ const formatDateForInput = (dateString) => {
 };
 
 function AddCampaignPage() {
-  const { numberId: deviceIdFromParams } = useParams();
+  const params = useParams();
+  // Extract deviceId from different route patterns
+  const deviceIdFromParams = params.numberId || params.deviceId;
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
@@ -122,7 +127,18 @@ function AddCampaignPage() {
     const campaignIdFromQuery = searchParams.get('editCampaignId');
     const determinedCampaignId = campaignIdFromQuery || campaignIdFromPath;
 
-    const currentDeviceIdFromPath = deviceIdFromParams || pathParts[2]; // Device ID from path (index 2 for /ai-chatbot/:deviceId/... or /dashboard/add-campaign/:deviceId/...)
+    // Extract device ID from path based on route pattern
+    let currentDeviceIdFromPath = deviceIdFromParams;
+    if (!currentDeviceIdFromPath) {
+      if (pathParts[1] === 'dashboard' && pathParts[2] === 'add-campaign' && pathParts[3]) {
+        // Route: /dashboard/add-campaign/:deviceId
+        currentDeviceIdFromPath = pathParts[3];
+      } else if (pathParts[1] === 'ai-chatbot' && pathParts[2]) {
+        // Route: /ai-chatbot/:numberId/campaigns/...
+        currentDeviceIdFromPath = pathParts[2];
+      }
+      // For route /add-campaign, no device ID in path - leave as undefined
+    }
 
     if (determinedCampaignId) {
       setEditCampaignId(determinedCampaignId);
@@ -145,6 +161,11 @@ function AddCampaignPage() {
         ]);
 
         const fetchedDevices = devResponse.data || [];
+        console.log('[AddCampaignPage] Fetched devices:', fetchedDevices);
+        console.log('[AddCampaignPage] Campaign type:', determinedCampaignType);
+        console.log('[AddCampaignPage] Current device ID from path:', currentDeviceIdFromPath);
+        console.log('[AddCampaignPage] Selected device ID before:', selectedDeviceId);
+        
         setDevicesList(fetchedDevices);
         if(determinedCampaignType === 'bulk') {
           setContactGroupsList(groupsResponse.data || []);
@@ -152,9 +173,23 @@ function AddCampaignPage() {
         }
         
         if (currentDeviceIdFromPath) {
+            console.log('[AddCampaignPage] Setting device ID from path:', currentDeviceIdFromPath);
             setSelectedDeviceId(currentDeviceIdFromPath);
-        } else if (typeFromUrl === 'bulk' && fetchedDevices.length > 0 && !isEditMode) {
-            // setSelectedDeviceId(fetchedDevices[0].id); // Biar pengguna pilih atau automasi jika perlu
+        } else if (determinedCampaignType === 'bulk' && fetchedDevices.length > 0 && !isEditMode) {
+            // Auto-select first device for bulk campaigns if none is specified
+            const firstDevice = fetchedDevices[0];
+            const firstDeviceId = firstDevice.id; // Backend always provides this as d.deviceId
+            console.log('[AddCampaignPage] Auto-selecting first device for bulk campaign:', firstDeviceId, firstDevice);
+            console.log('[AddCampaignPage] First device available fields:', Object.keys(firstDevice));
+            setSelectedDeviceId(firstDeviceId);
+        } else {
+            console.log('[AddCampaignPage] No auto-selection. Conditions:', {
+                determinedCampaignType,
+                fetchedDevicesLength: fetchedDevices.length,
+                isEditMode,
+                currentDeviceIdFromPath,
+                firstDeviceKeys: fetchedDevices[0] ? Object.keys(fetchedDevices[0]) : 'No devices'
+            });
         }
 
         if (fetchedDevices.length === 0 && typeFromUrl === 'bulk' && !isEditMode && !currentDeviceIdFromPath) {
@@ -235,7 +270,7 @@ function AddCampaignPage() {
       }
     };
     if(user) fetchData(); // Hanya fetch jika user sudah ada
-  }, [location.search, location.pathname, user, deviceIdFromParams, isEditMode, editCampaignId, determinedCampaignType, selectedDeviceId]);
+  }, [location.search, location.pathname, user, deviceIdFromParams, isEditMode, editCampaignId, determinedCampaignType]);
 
   useEffect(() => {
     let hours = [];
@@ -311,8 +346,20 @@ function AddCampaignPage() {
     const currentSubmitDeviceId = selectedDeviceId; // selectedDeviceId sentiasa dikemaskini
 
     if (!currentSubmitDeviceId) {
-        toast.error("Device ID is required. Please select or ensure device is connected."); return;
+        toast.error("Device ID is required. Please select or ensure device is connected."); 
+        return;
     }
+    
+    // Validate that the selected device ID exists in the available devices list
+    const selectedDevice = devicesList.find(d => d.id === currentSubmitDeviceId);
+    if (!selectedDevice) {
+        toast.error(`Selected device ID "${currentSubmitDeviceId}" is not available. Please select a valid device.`);
+        console.error('Device validation failed. Available devices:', devicesList);
+        console.error('Attempted device ID:', currentSubmitDeviceId);
+        return;
+    }
+    
+    console.log('[Form Submit] Using valid device:', selectedDevice);
 
     setIsSaving(true);
     toast.info(isEditMode ? "Updating campaign..." : "Saving campaign...");
@@ -320,9 +367,30 @@ function AddCampaignPage() {
     const dataPayload = new FormData(); // Guna FormData untuk kedua-dua jenis
 
     if (determinedCampaignType === 'ai_chatbot') {
+        // Map frontend field names to backend expected names
+        const fieldMapping = {
+            'status': 'status',
+            'isNotMatchDefaultResponse': 'isNotMatchDefaultResponse', 
+            'sendTo': 'sendTo',
+            'type': 'type',
+            'name': 'name',
+            'description': 'description',
+            'keywords': 'keywords',
+            'nextBotAction': 'nextBotAction',
+            'presenceDelayTime': 'presenceDelayTime',
+            'presenceDelayStatus': 'presenceDelayStatus',
+            'saveData': 'saveData',
+            'apiRestDataStatus': 'apiRestDataStatus',
+            'captionAi': 'captionAi',
+            'useAiFeature': 'useAiFeature',
+            'aiSpintax': 'aiSpintax'
+        };
+
         Object.keys(aiChatbotFormData).forEach(key => {
             if (key === 'mediaFileAi' && aiChatbotFormData[key]) {
-                dataPayload.append(key, aiChatbotFormData[key]);
+                dataPayload.append('mediaFileAi', aiChatbotFormData[key]);
+            } else if (fieldMapping[key]) {
+                dataPayload.append(fieldMapping[key], aiChatbotFormData[key]);
             } else if (key !== 'mediaFileAi') {
                 dataPayload.append(key, aiChatbotFormData[key]);
             }
@@ -350,9 +418,9 @@ function AddCampaignPage() {
         dataPayload.append('campaignScheduleType', campaignScheduleType);
         dataPayload.append('campaignScheduleDetails', JSON.stringify(campaignScheduleType !== 'anytime' && definedHours.length > 0 ? definedHours : []));
         if (selectedMediaItems.length > 0) {
-            selectedMediaItems.forEach(item => dataPayload.append('mediaAttachments[]', item._id));
+            selectedMediaItems.forEach(item => dataPayload.append('mediaAttachments', item._id));
             if (dataPayload.has('mediaFile')) dataPayload.delete('mediaFile');
-        } else if (isEditMode && !formData.mediaFile && dataPayload.has('mediaAttachments[]') === false ) { 
+        } else if (isEditMode && !formData.mediaFile && selectedMediaItems.length === 0) { 
             dataPayload.append('mediaAttachments', JSON.stringify([])); // Hantar array kosong untuk clear
         }
     }
@@ -371,12 +439,53 @@ function AddCampaignPage() {
         apiMethod = isEditMode ? api.put : api.post;
       }
       
-      await apiMethod(apiUrlPath, dataPayload);
+      // Log data yang akan dihantar untuk debugging
+      console.log('=== CAMPAIGN SUBMISSION DEBUG ===');
+      console.log('Selected Device ID:', selectedDeviceId);
+      console.log('Current Submit Device ID:', currentSubmitDeviceId);
+      console.log('Device ID From Params:', deviceIdFromParams);
+      console.log('Determined Campaign Type:', determinedCampaignType);
+      console.log('API URL:', apiUrlPath);
+      console.log('API Method:', apiMethod.name);
+      console.log('Available Devices:', devicesList.map(d => ({
+        id: d.id,
+        name: d.name,
+        number: d.number,
+        connected: d.connected,
+        fullObject: d
+      })));
+      console.log('FormData contents:');
+      for (let [key, value] of dataPayload.entries()) {
+        console.log(`${key}:`, value);
+      }
+      console.log('===============================');
+      
+      const response = await apiMethod(apiUrlPath, dataPayload);
+      console.log('Response:', response);
       toast.success(isEditMode ? "Campaign updated!" : "Campaign created!");
       navigate(determinedCampaignType === 'bulk' ? '/' : `/ai-chatbot/${currentSubmitDeviceId}/campaigns`);
     } catch (error) {
       console.error(isEditMode ? "Update failed:" : "Save failed:", error);
-      const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || "An unknown error occurred.";
+      console.error('Error response:', error.response);
+      console.error('Error status:', error.response?.status);
+      console.error('Error data:', error.response?.data);
+      
+      // Handle detailed error messages
+      let errorMsg = "An unknown error occurred.";
+      if (error.response?.data) {
+        if (error.response.data.message) {
+          errorMsg = error.response.data.message;
+        } else if (error.response.data.error) {
+          if (Array.isArray(error.response.data.error)) {
+            errorMsg = error.response.data.error.join(', ');
+          } else {
+            errorMsg = error.response.data.error;
+          }
+        }
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+      
       toast.error(`Failed: ${errorMsg}`);
     } finally {
       setIsSaving(false);
@@ -392,8 +501,16 @@ function AddCampaignPage() {
     );
   }
 
+  const refreshPageData = () => {
+    window.location.reload();
+  };
+
   return (
     <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Add Campaign</h1>
+        <RefreshButton onRefresh={refreshPageData} position="relative" />
+      </div>
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Pemilihan Peranti - mungkin dikongsi atau dipaparkan secara berbeza */}
         <Card>
@@ -413,32 +530,66 @@ function AddCampaignPage() {
               )}
             </CardDescription>
           </CardHeader>
-          {(determinedCampaignType === 'bulk' || (determinedCampaignType === 'ai_chatbot' && selectedDeviceId)) && (
+          {(determinedCampaignType === 'bulk' || determinedCampaignType === 'ai_chatbot') && (
             <CardContent>
                 <div className="space-y-2">
                 <Label htmlFor="deviceSelect">Device {determinedCampaignType === 'bulk' && <span className="text-red-500">*</span>}</Label>
+                {/* Debug info */}
+                {process.env.NODE_ENV === 'development' && (
+                  <div className="text-xs text-gray-500 p-2 bg-gray-100 rounded">
+                    <strong>Debug Info:</strong><br/>
+                    Campaign Type: {determinedCampaignType}<br/>
+                    Devices Available: {devicesList.length}<br/>
+                    Selected Device ID: {selectedDeviceId || 'None'}<br/>
+                    Device ID From Params: {deviceIdFromParams || 'None'}<br/>
+                    Is Loading: {isLoadingPageData ? 'Yes' : 'No'}<br/>
+                    Is Edit Mode: {isEditMode ? 'Yes' : 'No'}<br/>
+                    Is Disabled: {(isLoadingPageData || (devicesList.length === 0) || (determinedCampaignType === 'ai_chatbot' && !isEditMode && !!deviceIdFromParams)) ? 'Yes' : 'No'}<br/>
+                    First Device Fields: {devicesList.length > 0 ? Object.keys(devicesList[0]).join(', ') : 'No devices'}
+                  </div>
+                )}
                 <Select 
-                    onValueChange={(value) => setSelectedDeviceId(value)} 
+                    onValueChange={(value) => {
+                        console.log('[AddCampaignPage] Device selection changed to:', value);
+                        setSelectedDeviceId(value);
+                    }} 
                     value={selectedDeviceId} 
-                    disabled={!!deviceIdFromParams || isLoadingPageData || (devicesList.length === 0 && determinedCampaignType === 'bulk') || (determinedCampaignType === 'ai_chatbot' && !isEditMode) } 
+                    disabled={
+                        isLoadingPageData || 
+                        (devicesList.length === 0) ||
+                        (determinedCampaignType === 'ai_chatbot' && !isEditMode && !!deviceIdFromParams)
+                    } 
                 >
                   <SelectTrigger id="deviceSelect" className={determinedCampaignType === 'ai_chatbot' && !isEditMode && !deviceIdFromParams ? 'border-destructive' : ''}>
                     <SelectValue placeholder={
                         isLoadingPageData ? "Loading devices..." : 
-                        (devicesList.length === 0 && determinedCampaignType === 'bulk') ? "No devices available" :
+                        (devicesList.length === 0) ? "No devices available" :
                         "Select a device..."
                     } />
                   </SelectTrigger>
                   <SelectContent>
-                    {devicesList.map(device => (
-                      <SelectItem key={device.id} value={device.id}>
-                        {device.name || device.id} ({device.phoneNumber || 'N/A'})
-                      </SelectItem>
-                    ))}
+                    {devicesList.map(device => {
+                      // Based on backend whatsapp routes, device structure is:
+                      // {id: d.deviceId, name: d.name || default, number: d.number || 'Not Available', connected: boolean}
+                      const deviceId = device.id; // Backend always provides this as d.deviceId
+                      const deviceName = device.name || deviceId;
+                      const phoneNumber = device.number || 'N/A';
+                      
+                      console.log('[SelectItem] Device:', device, 'Using ID:', deviceId);
+                      
+                      return (
+                        <SelectItem key={deviceId} value={deviceId}>
+                          {deviceName} ({phoneNumber})
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
-                {devicesList.length === 0 && determinedCampaignType === 'bulk' && !isLoadingPageData && (
-                    <p className="text-sm text-destructive">No devices found. Please connect a device on the WhatsApp page first.</p>
+                {devicesList.length === 0 && !isLoadingPageData && (
+                    <p className="text-sm text-destructive">
+                        No devices found. Please connect a WhatsApp device first. 
+                        <Link to="/whatsapp-connect" className="underline ml-1">Go to WhatsApp Connection page</Link>
+                    </p>
                 )}
               </div>
             </CardContent>
@@ -446,7 +597,18 @@ function AddCampaignPage() {
         </Card>
 
         {/* ======================== BULK CAMPAIGN FORM START ======================== */}
-        {determinedCampaignType === 'bulk' && selectedDeviceId && (
+        {/* Debug info for bulk campaign form visibility */}
+        {process.env.NODE_ENV === 'development' && determinedCampaignType === 'bulk' && (
+          <div className="text-xs text-blue-600 p-2 bg-blue-50 rounded border">
+            <strong>Bulk Campaign Form Debug:</strong><br/>
+            Campaign Type: {determinedCampaignType}<br/>
+            Selected Device ID: {selectedDeviceId || 'None'}<br/>
+            Form Should Show: {(determinedCampaignType === 'bulk' && selectedDeviceId) ? 'Yes' : 'No'}<br/>
+            {!selectedDeviceId && 'Form hidden because no device selected. Please select a device above.'}
+          </div>
+        )}
+        {determinedCampaignType === 'bulk' && !isLoadingPageData && (
+          selectedDeviceId ? (
           <Card>
             <CardHeader>
                 <CardTitle>Bulk Campaign Details</CardTitle>
@@ -559,12 +721,31 @@ function AddCampaignPage() {
                 {/* Lain-lain field seperti Enable Link, Status, dll. boleh ditambah di sini jika perlu */}
             </CardContent>
           </Card>
-        )}
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Device Selection Required</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-6">
+                <p className="text-muted-foreground mb-4">
+                  Please select a WhatsApp device above to continue creating your bulk campaign.
+                </p>
+                {devicesList.length === 0 && (
+                  <p className="text-sm text-destructive">
+                    No devices available. Please connect a WhatsApp device first.
+                    <Link to="/whatsapp-connect" className="underline ml-1">Go to WhatsApp Connection</Link>
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
         {/* ======================== BULK CAMPAIGN FORM END ======================== */}
 
 
         {/* ======================== AI CHATBOT FORM START ======================== */}
-        {determinedCampaignType === 'ai_chatbot' && selectedDeviceId && (
+        {determinedCampaignType === 'ai_chatbot' && !isLoadingPageData && selectedDeviceId && (
             <Card>
             <CardHeader>
                 <CardTitle>AI Chatbot Item</CardTitle>

@@ -8,6 +8,8 @@ import AdminRouteGuard from './components/AdminRouteGuard'; // Import AdminRoute
 // Import komponen halaman sebenar
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import ContactPage from './pages/ContactPage';
 import AutoresponderPage from './pages/AIChatbotPage';
@@ -276,6 +278,8 @@ function App() {
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
       </Route>
 
       {/* Laluan untuk Aplikasi Utama (dilindungi oleh MainLayout) */}

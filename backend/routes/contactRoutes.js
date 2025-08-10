@@ -4,11 +4,12 @@ const {
   getContacts,
   addContact,
   deleteContact,
-  uploadContacts
+  uploadContacts,
+  downloadTemplate
 } = require('../controllers/contactController.js');
 const { protect } = require('../middleware/authMiddleware.js');
 const multer = require('multer');
-const { uploadCsv } = require('../middleware/uploadMiddleware.js');
+const { uploadExcel } = require('../middleware/uploadMiddleware.js');
 
 // Konfigurasi Multer untuk simpanan memori dan penapis fail Excel
 const storage = multer.memoryStorage();
@@ -40,6 +41,9 @@ router.route('/:id')
 
 // Laluan baru untuk muat naik fail Excel
 // Guna upload.single('file') - 'file' mesti padan dengan nama field dalam FormData frontend
-router.post('/upload', uploadCsv, uploadContacts);
+router.post('/upload', uploadExcel, uploadContacts);
+
+// Route untuk download template Excel
+router.get('/template', downloadTemplate);
 
 module.exports = router; 

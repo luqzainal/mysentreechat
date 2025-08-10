@@ -46,6 +46,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+// Import Refresh Button
+import RefreshButton from '../../components/RefreshButton';
+
 const UserListPage = () => {
     const [users, setUsers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -242,9 +245,23 @@ const UserListPage = () => {
     // Allowed plans for selection
     const allowedPlans = ['Free', 'Basic', 'Pro']; // Adjust with your plans
 
+    const refreshUsers = async () => {
+        if (loggedInUser?.role === 'admin') {
+            try {
+                const { data } = await api.get('/admin/users');
+                setUsers(data);
+            } catch (err) {
+                toast.error('Failed to refresh user list.');
+            }
+        }
+    };
+
     return (
         <div className="container mx-auto p-4 space-y-6">
-            <h1 className="text-3xl font-bold">User Management</h1> {/* Translate heading */}
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold">User Management</h1>
+                <RefreshButton onRefresh={refreshUsers} position="relative" />
+            </div>
 
             <Table>
                 <TableHeader>

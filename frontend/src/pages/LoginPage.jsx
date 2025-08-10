@@ -83,9 +83,9 @@ function LoginPage() {
                       </Label>
                        <span className="text-sm font-medium text-gray-700 block mb-1">Password</span> {/* Custom visible label */}
                        <div className="text-sm">
-                          <a href="#" className="font-medium text-indigo-600 hover:text-indigo-500"> {/* Placeholder link */}
+                          <Link to="/forgot-password" className="font-medium text-indigo-600 hover:text-indigo-500">
                             Forgot password?
-                          </a>
+                          </Link>
                        </div>
                   </div>
                 <Input

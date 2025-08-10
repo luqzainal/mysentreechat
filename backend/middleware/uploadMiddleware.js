@@ -23,8 +23,8 @@ const mediaStorage = multer.diskStorage({
   }
 });
 
-// Konfigurasi storan Multer (untuk CSV/Excel - simpan di memori)
-const csvStorage = multer.memoryStorage();
+// Konfigurasi storan Multer (untuk Excel - simpan di memori)
+const excelStorage = multer.memoryStorage();
 
 // Penapis fail media
 const mediaFileFilter = (req, file, cb) => {
@@ -35,14 +35,13 @@ const mediaFileFilter = (req, file, cb) => {
    }
 };
 
-// Penapis fail CSV/Excel
-const csvFileFilter = (req, file, cb) => {
+// Penapis fail Excel (hanya Excel, buang CSV)
+const excelFileFilter = (req, file, cb) => {
   if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || // .xlsx
-      file.mimetype === 'application/vnd.ms-excel' || // .xls
-      file.mimetype === 'text/csv') { // .csv
+      file.mimetype === 'application/vnd.ms-excel') { // .xls
     cb(null, true);
   } else {
-    cb(new Error('Hanya fail Excel (.xlsx, .xls) atau CSV (.csv) dibenarkan!'), false);
+    cb(new Error('Hanya fail Excel (.xlsx, .xls) dibenarkan!'), false);
   }
 };
 
@@ -53,18 +52,20 @@ const uploadMediaInstance = multer({
    limits: { fileSize: 1024 * 1024 * 25 } // Had saiz 25MB
 });
 
-// Multer instance untuk CSV/Excel (guna memory storage)
-const uploadCsvInstance = multer({
-   storage: csvStorage,
-   fileFilter: csvFileFilter,
+// Multer instance untuk Excel (guna memory storage)
+const uploadExcelInstance = multer({
+   storage: excelStorage,
+   fileFilter: excelFileFilter,
    limits: { fileSize: 1024 * 1024 * 5 } // Had saiz 5MB
 });
 
 // Eksport middleware spesifik
 const uploadMedia = uploadMediaInstance.single('mediaFile');
-const uploadCsv = uploadCsvInstance.single('file'); // Nama field 'file'
+const uploadMediaAi = uploadMediaInstance.single('mediaFileAi'); // For AI chatbot
+const uploadExcel = uploadExcelInstance.single('file'); // Nama field 'file'
 
 module.exports = { 
     uploadMedia, 
-    uploadCsv // Tambah uploadCsv ke exports
+    uploadMediaAi,
+    uploadExcel // Export uploadExcel
 }; 

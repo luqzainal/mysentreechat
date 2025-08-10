@@ -12,7 +12,18 @@
     "dev:backend": "cd backend && npm run server",
     "dev:frontend": "cd frontend && npm run dev",
     "start": "node server.js",
-    "build": "vite build && npm run build:frontend"
+    "build": "vite build && npm run build:frontend",
+    "db:clear": "node scripts/clear-database.js all",
+    "db:clear-collection": "node scripts/clear-database.js collection",
+    "db:list": "node scripts/clear-database.js list",
+    "db:help": "node scripts/clear-database.js",
+    "test:campaign-api": "node scripts/test-campaign-api.js",
+    "test:all-campaigns": "node scripts/test-all-campaigns.js",
+    "test:ai-integration": "node scripts/test-ai-integration.js",
+    "test:ai-campaign": "node scripts/test-ai-campaign-integration.js",
+    "debug:validation": "cd backend && node ../scripts/debug-campaign-validation.js",
+    "test:campaign-list": "node scripts/test-campaign-list.js",
+    "debug:devices": "node scripts/debug-device-selection.js"
   },
   "keywords": [
     "whatsapp",
@@ -23,9 +34,14 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.21.2"
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2",
+    "mongoose": "^8.17.0"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "axios": "^1.11.0"
   }
 }

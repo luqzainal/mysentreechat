@@ -8,7 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Wifi, WifiOff, QrCode as QrCodeIcon, Loader2, Link as LinkIcon, XCircle } from 'lucide-react'; // Import ikon
 
-const SOCKET_SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
+const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
 let socket = null; // Define socket outside component to avoid re-creation on re-renders
 
 const WhatsappConnectPage = () => {
@@ -31,10 +34,12 @@ const WhatsappConnectPage = () => {
         socket.disconnect();
     }
 
-    console.log("Attempting to connect socket...");
+    console.log("Attempting to connect socket to:", SOCKET_SERVER_URL);
     socket = io(SOCKET_SERVER_URL, { 
-       // transports: ['websocket'], // Optional: force websocket
-       // autoConnect: false // Manage connection manually if needed
+       query: { userId: user._id },
+       transports: ['websocket', 'polling'],
+       timeout: 20000,
+       forceNew: true
     });
 
     socket.on('connect', () => {
@@ -192,8 +197,16 @@ const WhatsappConnectPage = () => {
     );
   };
 
+  const refreshConnection = () => {
+    window.location.reload();
+  };
+
   return (
     <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">WhatsApp Connection</h1>
+        <RefreshButton onRefresh={refreshConnection} position="relative" />
+      </div>
       <Card className="max-w-md mx-auto">
         <CardHeader>
           <CardTitle>WhatsApp Connection</CardTitle>

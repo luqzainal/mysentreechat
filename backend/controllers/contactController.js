@@ -1,6 +1,7 @@
 const Contact = require('../models/Contact.js');
 const ContactGroup = require('../models/ContactGroup.js');
 const xlsx = require('xlsx');
+const { processExcelFile, validateExcelStructure, generateTemplate } = require('../utils/excelProcessor.js');
 
 // @desc    Dapatkan semua kenalan pengguna
 // @route   GET /contacts
@@ -98,7 +99,16 @@ const uploadContacts = async (req, res) => {
   const { groupId } = req.body;
 
   if (!req.file) {
-    return res.status(400).json({ message: 'Tiada fail dimuat naik.' });
+    return res.status(400).json({ message: 'No file uploaded.' });
+  }
+
+  // Validate file structure first
+  const structureValidation = validateExcelStructure(req.file.buffer);
+  if (!structureValidation.isValid) {
+    return res.status(400).json({ 
+      message: 'Invalid Excel file structure.', 
+      error: structureValidation.error 
+    });
   }
 
   let targetGroup = null;
@@ -106,106 +116,157 @@ const uploadContacts = async (req, res) => {
     try {
       targetGroup = await ContactGroup.findOne({ _id: groupId, user: req.user._id });
       if (!targetGroup) {
-        return res.status(404).json({ message: `Kumpulan dengan ID ${groupId} tidak ditemui atau bukan milik anda.` });
+        return res.status(404).json({ message: `Contact group with ID ${groupId} not found.` });
       }
     } catch (groupError) {
       if (groupError.kind === 'ObjectId') {
-        return res.status(400).json({ message: `ID Kumpulan ${groupId} tidak sah.` });
+        return res.status(400).json({ message: `Invalid group ID: ${groupId}` });
       }
-      console.error("Ralat mencari kumpulan:", groupError);
-      return res.status(500).json({ message: 'Ralat semasa mengakses kumpulan kenalan.' });
+      console.error("Error finding contact group:", groupError);
+      return res.status(500).json({ message: 'Error accessing contact group.' });
     }
   }
 
   try {
-    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(worksheet);
-
-    if (!data || data.length === 0) {
-      return res.status(400).json({ message: 'Fail Excel kosong atau format tidak sah.' });
+    // Process Excel file using our utility
+    const processed = processExcelFile(req.file.buffer, req.file.originalname);
+    
+    if (!processed.success) {
+      return res.status(400).json({ 
+        message: 'Failed to process Excel file.', 
+        error: processed.error,
+        errors: processed.errors 
+      });
     }
 
+    const { validContacts, errors, summary } = processed;
+
+    if (validContacts.length === 0) {
+      return res.status(400).json({ 
+        message: 'No valid contacts found in Excel file.', 
+        errors: errors,
+        summary: summary 
+      });
+    }
+
+    // Check for existing contacts in database
+    const existingNumbers = new Set(
+      (await Contact.find({ user: req.user._id }, 'phoneNumber'))
+        .map(c => c.phoneNumber.replace('@c.us', ''))
+    );
+
     const contactsToInsert = [];
-    const errors = [];
-    const existingNumbers = new Set((await Contact.find({ user: req.user._id }, 'phoneNumber')).map(c => c.phoneNumber));
+    const finalErrors = [...errors];
 
-    data.forEach((row, index) => {
-      const name = row['Nama'] || row['Name'];
-      let phoneNumber = row['Nombor Telefon'] || row['Phone Number'] || row['PhoneNumber'];
-
-      if (!name || !phoneNumber) {
-        errors.push(`Baris ${index + 2}: Nama atau Nombor Telefon tiada.`);
-        return;
-      }
+    validContacts.forEach((contact) => {
+      // Add @c.us suffix for WhatsApp format
+      const formattedPhoneNumber = `${contact.phone}@c.us`;
       
-      phoneNumber = String(phoneNumber).replace(/\D/g, '');
-      if (!phoneNumber) {
-        errors.push(`Baris ${index + 2}: Nombor Telefon tidak sah.`);
+      // Check if contact already exists
+      if (existingNumbers.has(contact.phone)) {
+        finalErrors.push(`Row ${contact.rowNumber}: Phone number ${contact.originalPhone} already exists.`);
         return;
       }
-      const formattedPhoneNumber = `${phoneNumber}@c.us`;
 
-      if (existingNumbers.has(formattedPhoneNumber) || contactsToInsert.some(c => c.phoneNumber === formattedPhoneNumber)) {
-        errors.push(`Baris ${index + 2}: Nombor Telefon ${phoneNumber} (${formattedPhoneNumber}) sudah wujud.`);
+      // Check for duplicates in current batch
+      const existingInBatch = contactsToInsert.find(c => 
+        c.phoneNumber.replace('@c.us', '') === contact.phone
+      );
+      if (existingInBatch) {
+        finalErrors.push(`Row ${contact.rowNumber}: Duplicate phone number ${contact.originalPhone} in file.`);
         return;
       }
 
       contactsToInsert.push({
-        name: String(name).trim(),
+        name: contact.name,
         phoneNumber: formattedPhoneNumber,
         user: req.user._id,
       });
     });
 
+    // Insert contacts into database
     let createdContacts = [];
     if (contactsToInsert.length > 0) {
       try {
         createdContacts = await Contact.insertMany(contactsToInsert, { ordered: false });
       } catch (insertError) {
-        console.error("Ralat semasa insertMany:", insertError);
+        console.error("Error during insertMany:", insertError);
         createdContacts = insertError.insertedDocs || [];
         if (createdContacts.length < contactsToInsert.length) {
-          errors.push(`Sebahagian data gagal disimpan ke pangkalan data. Berjaya: ${createdContacts.length}, Gagal: ${contactsToInsert.length - createdContacts.length}`);
-        } else if (createdContacts.length === 0) {
-          errors.push("Tiada data berjaya disimpan ke pangkalan data disebabkan ralat.");
+          finalErrors.push(`Some contacts failed to save to database. Success: ${createdContacts.length}, Failed: ${contactsToInsert.length - createdContacts.length}`);
         }
       }
     }
     
-    let message = `${createdContacts.length} kenalan berjaya ditambah.`;
+    let message = `${createdContacts.length} contacts successfully added.`;
     
-    // Jika ada targetGroup, tambah kenalan yang berjaya dicipta ke group
+    // Add contacts to group if specified
     if (targetGroup && createdContacts.length > 0) {
       const newContactIds = createdContacts.map(c => c._id);
       let addedToGroupCount = 0;
+      
       newContactIds.forEach(id => {
         if (!targetGroup.contacts.includes(id)) {
           targetGroup.contacts.push(id);
           addedToGroupCount++;
         }
       });
+      
       if (addedToGroupCount > 0) {
         targetGroup.contactCount = targetGroup.contacts.length;
         await targetGroup.save();
-        message += ` ${addedToGroupCount} daripadanya ditambah ke kumpulan '${targetGroup.groupName}'.`;
+        message += ` ${addedToGroupCount} of them added to group '${targetGroup.groupName}'.`;
       }
     }
 
-    if (errors.length > 0) {
-      message += ` ${errors.length > 0 ? 'Beberapa baris diabaikan atau gagal.' : ''}`;
+    if (finalErrors.length > 0) {
+      message += ` ${finalErrors.length} rows were skipped due to errors.`;
     }
 
     res.status(201).json({
+      success: true,
       message: message,
-      successCount: createdContacts.length,
-      errors: errors,
+      summary: {
+        totalRows: summary.total,
+        validRows: validContacts.length,
+        successfullyCreated: createdContacts.length,
+        errorCount: finalErrors.length,
+        fileName: summary.fileName
+      },
+      errors: finalErrors,
     });
 
   } catch (error) {
-    console.error("Ralat memproses fail Excel:", error);
-    res.status(500).json({ message: 'Ralat pelayan semasa memproses fail.', errorDetail: error.message });
+    console.error("Error processing Excel file:", error);
+    res.status(500).json({ 
+      message: 'Server error while processing file.', 
+      error: error.message 
+    });
+  }
+};
+
+// @desc    Download Excel template for contacts
+// @route   GET /contacts/template
+// @access  Private
+const downloadTemplate = async (req, res) => {
+  try {
+    const templateBuffer = generateTemplate();
+    
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const filename = `contact_template_${timestamp}.xlsx`;
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', templateBuffer.length);
+    
+    res.send(templateBuffer);
+    
+  } catch (error) {
+    console.error("Error generating template:", error);
+    res.status(500).json({ 
+      message: 'Error generating Excel template.', 
+      error: error.message 
+    });
   }
 };
 
@@ -215,4 +276,5 @@ module.exports = {
   addContact,
   deleteContact,
   uploadContacts,
+  downloadTemplate,
 }; 

@@ -42,6 +42,9 @@ import {
   Edit
 } from 'lucide-react';
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -133,7 +136,10 @@ function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold">Welcome, {user?.name || 'User'}!</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Welcome, {user?.name || 'User'}!</h1>
+        <RefreshButton onRefresh={fetchDashboardData} position="relative" />
+      </div>
       
       {/* Bahagian Analitik Ringkasan */}
       <div className="grid gap-4 md:grid-cols-3">

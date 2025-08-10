@@ -1,5 +1,6 @@
 const WhatsappDevice = require('../models/WhatsappDevice');
 const Campaign = require('../models/Campaign');
+const Media = require('../models/Media');
 const asyncHandler = require('../middleware/asyncHandler');
 
 // @desc    Get summary of AI-enabled devices/numbers for AI Chatbot page
@@ -89,13 +90,46 @@ const getAiCampaigns = asyncHandler(async (req, res) => {
     const { deviceId } = req.params;
     const userId = req.user.id;
 
+    console.log(`[getAiCampaigns] Fetching campaigns for userId: ${userId}, deviceId: ${deviceId}`);
+
+    // Validate device ownership first
+    const device = await WhatsappDevice.findOne({ userId: userId, deviceId: deviceId });
+    if (!device) {
+        console.log(`[getAiCampaigns] Device ${deviceId} not found or not authorized for user ${userId}`);
+        res.status(404);
+        throw new Error('Device not found or not authorized for this user.');
+    }
+
     const campaigns = await Campaign.find({
         userId: userId,
         deviceId: deviceId,
         campaignType: 'ai_chatbot'
     }).sort({ createdAt: -1 });
 
-    res.json(campaigns);
+    console.log(`[getAiCampaigns] Found ${campaigns.length} campaigns for device ${deviceId}`);
+
+    // Format data for frontend consistency
+    const formattedCampaigns = campaigns.map(c => ({
+        _id: c._id,
+        id: c._id, // For compatibility
+        name: c.name || c.campaignName,
+        status: c.status === 'enable' ? 'Enabled' : 'Disabled',
+        useAI: c.useAiFeature === 'use_ai',
+        media: !!(c.mediaAttachments && c.mediaAttachments.length > 0),
+        link: c.enableLink || false,
+        lastEdited: c.updatedAt.toISOString().split('T')[0], // Format YYYY-MM-DD
+        // Include other fields that might be needed
+        description: c.description,
+        keywords: c.keywords,
+        captionAi: c.captionAi,
+        type: c.type,
+        sendTo: c.sendTo,
+        presenceDelayStatus: c.presenceDelayStatus,
+        saveData: c.saveData,
+        apiRestDataStatus: c.apiRestDataStatus
+    }));
+
+    res.json(formattedCampaigns);
 });
 
 // @desc    Create new AI chatbot campaign
@@ -117,12 +151,38 @@ const createAiCampaign = asyncHandler(async (req, res) => {
         req.body.keywords = req.body.keywords.split(',').map(k => k.trim()).filter(k => k);
     }
 
-    const campaign = await Campaign.create({
+    // Handle media file if uploaded
+    let finalMediaAttachmentIds = [];
+    if (req.file) {
+        try {
+            const newMediaRecord = await Media.create({
+                user: userId,
+                originalName: req.file.originalname,
+                fileName: req.file.filename,
+                filePath: `/uploads/media/${req.file.filename}`,
+                fileType: req.file.mimetype,
+                fileSize: req.file.size,
+            });
+            finalMediaAttachmentIds.push(newMediaRecord._id);
+            console.log("New Media record created for AI chatbot:", newMediaRecord._id);
+        } catch (mediaCreationError) {
+            console.error("Error creating Media record for AI chatbot:", mediaCreationError);
+            res.status(500);
+            throw new Error('Failed to process uploaded media file.');
+        }
+    }
+
+    const campaignData = {
         ...req.body,
         userId: userId,
         deviceId: deviceId,
-        campaignType: 'ai_chatbot'
-    });
+        campaignType: 'ai_chatbot',
+        mediaAttachments: finalMediaAttachmentIds,
+        // Set campaignName to name for compatibility if needed
+        campaignName: req.body.name
+    };
+
+    const campaign = await Campaign.create(campaignData);
 
     res.status(201).json(campaign);
 });
@@ -141,23 +201,57 @@ const updateAiCampaign = asyncHandler(async (req, res) => {
         throw new Error('Device not found or not authorized for this user.');
     }
 
-    // Process keywords if provided as string
-    if (req.body.keywords && typeof req.body.keywords === 'string') {
-        req.body.keywords = req.body.keywords.split(',').map(k => k.trim()).filter(k => k);
-    }
-
-    const campaign = await Campaign.findOneAndUpdate(
-        { _id: campaignId, userId: userId, deviceId: deviceId, campaignType: 'ai_chatbot' },
-        req.body,
-        { new: true, runValidators: true }
-    );
+    // Get existing campaign
+    let campaign = await Campaign.findOne({
+        _id: campaignId, 
+        userId: userId, 
+        deviceId: deviceId, 
+        campaignType: 'ai_chatbot'
+    });
 
     if (!campaign) {
         res.status(404);
         throw new Error('Campaign not found or not authorized for this user.');
     }
 
-    res.json(campaign);
+    // Process keywords if provided as string
+    if (req.body.keywords && typeof req.body.keywords === 'string') {
+        req.body.keywords = req.body.keywords.split(',').map(k => k.trim()).filter(k => k);
+    }
+
+    // Handle media file if uploaded
+    let finalMediaAttachmentIds = [...(campaign.mediaAttachments || [])];
+    if (req.file) {
+        try {
+            const newMediaRecord = await Media.create({
+                user: userId,
+                originalName: req.file.originalname,
+                fileName: req.file.filename,
+                filePath: `/uploads/media/${req.file.filename}`,
+                fileType: req.file.mimetype,
+                fileSize: req.file.size,
+            });
+            finalMediaAttachmentIds = [newMediaRecord._id]; // Replace existing media
+            console.log("New Media record created for AI chatbot update:", newMediaRecord._id);
+        } catch (mediaCreationError) {
+            console.error("Error creating Media record for AI chatbot update:", mediaCreationError);
+            res.status(500);
+            throw new Error('Failed to process uploaded media file.');
+        }
+    }
+
+    const updatedCampaign = await Campaign.findOneAndUpdate(
+        { _id: campaignId, userId: userId, deviceId: deviceId, campaignType: 'ai_chatbot' },
+        { 
+            ...req.body, 
+            mediaAttachments: finalMediaAttachmentIds,
+            // Set campaignName to name for compatibility if needed
+            campaignName: req.body.name 
+        },
+        { new: true, runValidators: true }
+    );
+
+    res.json(updatedCampaign);
 });
 
 // @desc    Delete AI chatbot campaign

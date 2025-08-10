@@ -1,11 +1,10 @@
 import axios from 'axios';
+import config from '../config';
 
 // Cipta instance Axios
 const api = axios.create({
-  // Tetapkan baseURL kepada alamat backend API anda
-  // Pastikan ia sepadan dengan port backend anda (default: 5000 jika tiada .env)
-  // Tambah /api pada akhir baseURL
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: config.API_URL,
+  timeout: config.API_TIMEOUT,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -18,9 +17,32 @@ api.interceptors.request.use(
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
+    
+    // Remove Content-Type header for FormData to let axios set it with boundary
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+    
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Interceptor response untuk mengendalikan 401 error
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token tidak sah atau telah tamat tempoh
+      localStorage.removeItem('token');
+      localStorage.removeItem('userInfo');
+      // Redirect ke halaman login jika diperlukan
+      window.location.href = '/login';
+    }
     return Promise.reject(error);
   }
 );

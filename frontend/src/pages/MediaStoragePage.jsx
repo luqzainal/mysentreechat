@@ -21,6 +21,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 // Fungsi helper untuk format saiz fail
 const formatBytes = (bytes, decimals = 2) => {
   if (bytes === 0) return '0 Bytes';
@@ -146,6 +149,10 @@ const MediaStoragePage = () => {
 
   return (
     <div className="container mx-auto p-4 space-y-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Media Storage</h1>
+        <RefreshButton onRefresh={fetchMedia} position="relative" />
+      </div>
       {/* Upload Section */}
       <Card>
         <CardHeader>

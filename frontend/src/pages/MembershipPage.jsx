@@ -6,6 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"; // Untuk paparkan nama pelan
 import { Skeleton } from "@/components/ui/skeleton"; // For loading state
 
+// Import Refresh Button
+import RefreshButton from '../components/RefreshButton';
+
 const MembershipPage = () => {
   const [profile, setProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,8 +59,26 @@ const MembershipPage = () => {
       }
   }
 
+  const refreshMembership = async () => {
+    if (user) {
+      setIsLoading(true);
+      try {
+        const response = await api.get('/users/profile');
+        setProfile(response.data);
+      } catch (error) {
+        toast.error("Failed to refresh membership information.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
   return (
     <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Membership</h1>
+        <RefreshButton onRefresh={refreshMembership} position="relative" />
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>Membership Status</CardTitle> {/* Translate title */}

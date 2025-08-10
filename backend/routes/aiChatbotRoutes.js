@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/authMiddleware');
+const { uploadMediaAi } = require('../middleware/uploadMiddleware');
 const {
     getAiDeviceSummary,
     updateAiDeviceStatus,
@@ -21,8 +22,8 @@ router.put('/devices/:deviceId/status', protect, updateAiDeviceStatus);
 
 // Campaign routes
 router.get('/:deviceId/campaigns', protect, getAiCampaigns);
-router.post('/:deviceId/campaigns', protect, createAiCampaign);
-router.put('/:deviceId/campaigns/:campaignId', protect, updateAiCampaign);
+router.post('/:deviceId/campaigns', protect, uploadMediaAi, createAiCampaign);
+router.put('/:deviceId/campaigns/:campaignId', protect, uploadMediaAi, updateAiCampaign);
 router.delete('/:deviceId/campaigns/:campaignId', protect, deleteAiCampaign);
 router.put('/:deviceId/campaigns/:campaignId/status', protect, toggleAiCampaignStatus);
 
