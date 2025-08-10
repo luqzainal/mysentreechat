@@ -11,7 +11,8 @@
       "Bash(PORT=3001 node server.cjs)",
       "Bash(rm:*)",
       "Bash(mkdir:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }
