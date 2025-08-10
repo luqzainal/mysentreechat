@@ -10,39 +10,42 @@ export const AuthProvider = ({ children }) => {
   // Cuba muatkan data pengguna dari localStorage semasa aplikasi dimuatkan
   useEffect(() => {
     const storedUser = localStorage.getItem('userInfo');
-    const token = localStorage.getItem('token');
+    const accessToken = localStorage.getItem('accessToken');
 
-    if (storedUser && token) {
+    if (storedUser && accessToken) {
       try {
         setUser(JSON.parse(storedUser));
         // Set header Authorization untuk permintaan axios seterusnya
-        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
       } catch (error) {
         console.error("Gagal memparse data pengguna dari localStorage:", error);
         // Jika gagal parse, buang data lama
         localStorage.removeItem('userInfo');
-        localStorage.removeItem('token');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
       }
     }
     setLoading(false); // Selesai memuatkan state awal
   }, []);
 
   // Fungsi untuk login
-  const login = (userData, token) => {
+  const login = (userData, accessToken, refreshToken) => {
     localStorage.setItem('userInfo', JSON.stringify(userData));
-    localStorage.setItem('token', token);
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('refreshToken', refreshToken);
     setUser(userData);
     // Set header Authorization untuk permintaan axios seterusnya
-    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
     console.log("AuthContext: Pengguna berjaya log masuk", userData);
-    console.log("AuthContext: Token disimpan", token);
+    console.log("AuthContext: Access token disimpan", accessToken);
 
   };
 
   // Fungsi untuk logout
   const logout = () => {
     localStorage.removeItem('userInfo');
-    localStorage.removeItem('token');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     setUser(null);
     // Buang header Authorization
     delete api.defaults.headers.common['Authorization'];

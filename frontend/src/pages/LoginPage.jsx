@@ -24,7 +24,7 @@ function LoginPage() {
 
     try {
       const { data } = await api.post('/users/login', { email, password });
-      login(data, data.token);
+      login(data, data.accessToken, data.refreshToken);
       // Redirect handled by AuthProvider/MainLayout
     } catch (err) {
       setError(

@@ -77,14 +77,14 @@ For production, configure SSL certificates:
 
 ```bash
 # Using Let's Encrypt with Certbot
-sudo certbot --nginx -d yourdomain.com
+sudo certbot --nginx -d chatbot.kuasaplus.com
 ```
 
 ### 4. Nginx Configuration (if using reverse proxy)
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name yourdomain.com;
+    server_name chatbot.kuasaplus.com;
     
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
