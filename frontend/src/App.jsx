@@ -290,6 +290,7 @@ function App() {
         <Route path="/ai-chatbot" element={<AutoresponderPage />} />
         <Route path="/ai-chatbot/:numberId/campaigns" element={<CampaignListPage />} />
         <Route path="/ai-chatbot/:numberId/campaigns/create" element={<AddCampaignPage />} />
+        <Route path="/ai-chatbot/:numberId/campaigns/:campaignId/edit" element={<AddCampaignPage />} />
         <Route path="/add-campaign" element={<AddCampaignPage />} />
         <Route path="/media-storage" element={<MediaStoragePage />} />
         <Route path="/account" element={<AccountPage />} />

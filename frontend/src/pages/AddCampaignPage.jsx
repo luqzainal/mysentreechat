@@ -626,7 +626,15 @@ function AddCampaignPage() {
                     <Label htmlFor="contactGroupId">Contact Group <span className="text-red-500">*</span></Label>
                     <Select onValueChange={setSelectedContactGroupId} value={selectedContactGroupId} required>
                         <SelectTrigger id="contactGroupId">
-                        <SelectValue placeholder="Select contact group..." />
+                        <SelectValue placeholder="Select contact group...">
+                            {selectedContactGroupId && contactGroupsList.length > 0 ? 
+                                (() => {
+                                    const selectedGroup = contactGroupsList.find(group => group._id === selectedContactGroupId);
+                                    return selectedGroup ? `${selectedGroup.name} (${selectedGroup.count} contacts)` : 'Select contact group...';
+                                })()
+                                : 'Select contact group...'
+                            }
+                        </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                         {contactGroupsList.length === 0 && <p className="p-2 text-sm text-muted-foreground">No contact groups found.</p>}
