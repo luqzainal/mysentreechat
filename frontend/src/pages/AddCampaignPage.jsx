@@ -114,13 +114,25 @@ function AddCampaignPage() {
 
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
-    const typeFromUrl = searchParams.get('type') || 'bulk';
+    const pathParts = location.pathname.split('/');
+    
+    // Determine campaign type from URL path, not query parameter
+    let typeFromUrl = 'bulk'; // default
+    if (pathParts[1] === 'ai-chatbot') {
+      typeFromUrl = 'ai_chatbot';
+    } else {
+      // Check query parameter as fallback for other routes
+      typeFromUrl = searchParams.get('type') || 'bulk';
+    }
     setDeterminedCampaignType(typeFromUrl);
 
     // Safely get campaignId from URL parts
-    const pathParts = location.pathname.split('/');
     let campaignIdFromPath = null;
-    if (pathParts.length >= 5 && pathParts[3] === 'campaigns' && pathParts[4] !== 'create') {
+    if (pathParts[1] === 'ai-chatbot' && pathParts[3] === 'campaigns' && pathParts[4] && pathParts[4] !== 'create') {
+        // AI chatbot edit: /ai-chatbot/:numberId/campaigns/:campaignId/edit
+        campaignIdFromPath = pathParts[4];
+    } else if (pathParts.length >= 5 && pathParts[3] === 'campaigns' && pathParts[4] !== 'create') {
+        // Other routes: /something/campaigns/:campaignId
         campaignIdFromPath = pathParts[4];
     }
 
@@ -198,16 +210,16 @@ function AddCampaignPage() {
         
         // Logik untuk memuatkan data kempen sedia ada (jika mod edit)
         if (isEditMode && editCampaignId && selectedDeviceId && editCampaignId !== 'create') {
-            toast.info(`Loading ${typeFromUrl} campaign details for editing (ID: ${editCampaignId})...`);
+            toast.info(`Loading ${determinedCampaignType} campaign details for editing (ID: ${editCampaignId})...`);
             // API endpoint mungkin berbeza untuk AI chatbot dan Bulk
-            const campaignApiUrl = typeFromUrl === 'ai_chatbot' 
+            const campaignApiUrl = determinedCampaignType === 'ai_chatbot' 
                 ? `/ai-chatbot/${selectedDeviceId}/campaigns/${editCampaignId}` 
                 : `/campaigns/${selectedDeviceId}/${editCampaignId}`;
             
             const campResponse = await api.get(campaignApiUrl);
             const campaignData = campResponse.data;
 
-            if (typeFromUrl === 'ai_chatbot') {
+            if (determinedCampaignType === 'ai_chatbot') {
               setAiChatbotFormData({
                 status: campaignData.status || 'enable',
                 isNotMatchDefaultResponse: campaignData.isNotMatchDefaultResponse ? 'yes' : 'no' , // Asumsikan boolean dari backend
