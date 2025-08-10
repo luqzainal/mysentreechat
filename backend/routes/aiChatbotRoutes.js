@@ -6,6 +6,7 @@ const {
     getAiDeviceSummary,
     updateAiDeviceStatus,
     getAiCampaigns,
+    getAiCampaign,
     createAiCampaign,
     updateAiCampaign,
     deleteAiCampaign,
@@ -22,6 +23,7 @@ router.put('/devices/:deviceId/status', protect, updateAiDeviceStatus);
 
 // Campaign routes
 router.get('/:deviceId/campaigns', protect, getAiCampaigns);
+router.get('/:deviceId/campaigns/:campaignId', protect, getAiCampaign);
 router.post('/:deviceId/campaigns', protect, uploadMediaAi, createAiCampaign);
 router.put('/:deviceId/campaigns/:campaignId', protect, uploadMediaAi, updateAiCampaign);
 router.delete('/:deviceId/campaigns/:campaignId', protect, deleteAiCampaign);

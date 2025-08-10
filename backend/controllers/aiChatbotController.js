@@ -132,6 +132,81 @@ const getAiCampaigns = asyncHandler(async (req, res) => {
     res.json(formattedCampaigns);
 });
 
+// @desc    Get single AI chatbot campaign for editing
+// @route   GET /api/ai-chatbot/:deviceId/campaigns/:campaignId
+// @access  Private
+const getAiCampaign = asyncHandler(async (req, res) => {
+    const { deviceId, campaignId } = req.params;
+    const userId = req.user.id;
+
+    console.log(`[getAiCampaign] Fetching campaign ${campaignId} for userId: ${userId}, deviceId: ${deviceId}`);
+
+    // Validate ObjectId format for campaignId
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(campaignId)) {
+        console.log(`[getAiCampaign] Invalid campaignId format: ${campaignId}`);
+        res.status(400);
+        throw new Error('Invalid campaign ID format.');
+    }
+
+    let device, campaign;
+    
+    try {
+        // Validate device ownership first
+        device = await WhatsappDevice.findOne({ userId: userId, deviceId: deviceId });
+        if (!device) {
+            console.log(`[getAiCampaign] Device ${deviceId} not found or not authorized for user ${userId}`);
+            res.status(404);
+            throw new Error('Device not found or not authorized for this user.');
+        }
+
+        campaign = await Campaign.findOne({
+            _id: campaignId,
+            userId: userId,
+            deviceId: deviceId,
+            campaignType: 'ai_chatbot'
+        });
+
+        if (!campaign) {
+            console.log(`[getAiCampaign] Campaign ${campaignId} not found for device ${deviceId}`);
+            res.status(404);
+            throw new Error('Campaign not found or not authorized for this user.');
+        }
+    } catch (error) {
+        console.error(`[getAiCampaign] Database error: ${error.message}`);
+        if (error.name === 'CastError') {
+            res.status(400);
+            throw new Error('Invalid campaign ID format.');
+        }
+        throw error;
+    }
+
+    console.log(`[getAiCampaign] Found campaign: ${campaign.name}`);
+
+    // Return campaign data in the format expected by frontend
+    res.json({
+        _id: campaign._id,
+        name: campaign.name,
+        status: campaign.status,
+        isNotMatchDefaultResponse: campaign.isNotMatchDefaultResponse,
+        sendTo: campaign.sendTo,
+        type: campaign.type,
+        description: campaign.description,
+        keywords: campaign.keywords,
+        nextBotAction: campaign.nextBotAction,
+        presenceDelayTime: campaign.presenceDelayTime,
+        presenceDelayStatus: campaign.presenceDelayStatus,
+        saveData: campaign.saveData,
+        apiRestDataStatus: campaign.apiRestDataStatus,
+        captionAi: campaign.captionAi,
+        useAiFeature: campaign.useAiFeature,
+        aiSpintax: campaign.aiSpintax,
+        mediaAttachments: campaign.mediaAttachments,
+        createdAt: campaign.createdAt,
+        updatedAt: campaign.updatedAt
+    });
+});
+
 // @desc    Create new AI chatbot campaign
 // @route   POST /api/ai-chatbot/:deviceId/campaigns
 // @access  Private
@@ -439,6 +514,7 @@ module.exports = {
     getAiDeviceSummary,
     updateAiDeviceStatus,
     getAiCampaigns,
+    getAiCampaign,
     createAiCampaign,
     updateAiCampaign,
     deleteAiCampaign,
