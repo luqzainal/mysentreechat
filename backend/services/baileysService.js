@@ -443,7 +443,9 @@ async function connectToWhatsApp(userId) {
     });
 
     // Direct WebSocket message interception as backup
+    console.log(`[BAILEYS WEBSOCKET] Checking WebSocket availability for user ${userId}. sock.ws exists: ${!!sock.ws}`);
     if (sock.ws) {
+      console.log(`[BAILEYS WEBSOCKET] Setting up WebSocket message interception for user ${userId}...`);
       const originalOnMessage = sock.ws.onmessage;
       sock.ws.onmessage = function(event) {
         try {
@@ -469,6 +471,9 @@ async function connectToWhatsApp(userId) {
           originalOnMessage.call(this, event);
         }
       };
+      console.log(`[BAILEYS WEBSOCKET] WebSocket interception setup complete for user ${userId}`);
+    } else {
+      console.log(`[BAILEYS WEBSOCKET] No WebSocket available for user ${userId}. Will try alternative approaches.`);
     }
 
     // ---> TAMBAH HANDLER DEBUG BARU <---
@@ -476,6 +481,25 @@ async function connectToWhatsApp(userId) {
         console.log('[Baileys DEBUG] RAW messages.update event received:', JSON.stringify(m, null, 2));
     });
     console.log(`[Baileys] 'messages.update' handler bound for user ${userId}.`);
+
+    // Add final debug info about socket state
+    console.log(`[BAILEYS FINAL DEBUG] Socket info for user ${userId}:`);
+    console.log(`[BAILEYS FINAL DEBUG] - Socket exists: ${!!sock}`);
+    console.log(`[BAILEYS FINAL DEBUG] - Socket.ev exists: ${!!sock?.ev}`);
+    console.log(`[BAILEYS FINAL DEBUG] - Socket.ws exists: ${!!sock?.ws}`);
+    console.log(`[BAILEYS FINAL DEBUG] - Socket.user: ${JSON.stringify(sock?.user)}`);
+    console.log(`[BAILEYS FINAL DEBUG] - Socket readyState: ${sock?.ws?.readyState}`);
+
+    // Test if we can manually trigger events
+    setTimeout(() => {
+      console.log(`[BAILEYS DELAYED TEST] Checking if events work after 5 seconds for user ${userId}...`);
+      try {
+        sock.ev.emit('test-delayed', { userId, timestamp: Date.now() });
+        console.log(`[BAILEYS DELAYED TEST] Delayed test event emitted for user ${userId}`);
+      } catch (error) {
+        console.error(`[BAILEYS DELAYED TEST] Error emitting test event for user ${userId}:`, error);
+      }
+    }, 5000);
 
     sock.ev.on('chats.upsert', async (chats) => {
         console.log('[Baileys DEBUG] RAW chats.upsert event received:', JSON.stringify(chats, null, 2));
@@ -495,12 +519,19 @@ async function connectToWhatsApp(userId) {
     // ---> AKHIR TAMBAHAN HANDLER DEBUG <---
 
     // Add comprehensive event logging
+    console.log(`[BAILEYS SETUP] Setting up * (wildcard) event handler for user ${userId}...`);
     sock.ev.on('*', (event, ...args) => {
       console.log(`[BAILEYS ALL EVENTS] Event '${event}' triggered for user ${userId}`);
       if (event.includes('message') || event.includes('receipt') || event.includes('notify')) {
         console.log(`[BAILEYS EVENT] Event '${event}' triggered for user ${userId} with data:`, JSON.stringify(args, null, 2));
       }
     });
+    console.log(`[BAILEYS SETUP] * (wildcard) event handler bound for user ${userId}`);
+
+    // Test event system
+    console.log(`[BAILEYS TEST] Testing event system for user ${userId}...`);
+    sock.ev.emit('test-event', { test: 'data' });
+    console.log(`[BAILEYS TEST] Test event emitted for user ${userId}`);
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
