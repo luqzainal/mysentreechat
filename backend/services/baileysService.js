@@ -533,6 +533,56 @@ async function connectToWhatsApp(userId) {
     sock.ev.emit('test-event', { test: 'data' });
     console.log(`[BAILEYS TEST] Test event emitted for user ${userId}`);
 
+    // CRITICAL FIX: Direct message monitoring using setInterval as fallback
+    const messageMonitor = setInterval(async () => {
+      try {
+        if (!clients.has(userId)) {
+          console.log(`[BAILEYS MONITOR] Client no longer exists for user ${userId}, clearing monitor`);
+          clearInterval(messageMonitor);
+          return;
+        }
+        
+        // Check for very recent unprocessed messages (last 30 seconds)
+        const thirtySecondsAgo = new Date(Date.now() - 30000);
+        const recentMessages = await Message.find({
+          user: userId,
+          timestamp: { $gte: thirtySecondsAgo },
+          fromMe: false,
+          $or: [
+            { processed: { $exists: false } },
+            { processed: false }
+          ]
+        }).sort({ timestamp: -1 }).limit(3);
+        
+        if (recentMessages.length > 0) {
+          console.log(`[BAILEYS MONITOR] Found ${recentMessages.length} unprocessed recent messages for user ${userId}`);
+          
+          for (const msg of recentMessages) {
+            console.log(`[BAILEYS MONITOR] Processing message: "${msg.body}" from ${msg.chatJid}`);
+            
+            // Process with AI chatbot
+            const aiChatbotProcessor = require('./aiChatbotProcessor.js');
+            const chatbotData = {
+              messageId: msg.messageId,
+              chatJid: msg.chatJid,
+              messageText: msg.body,
+              timestamp: Math.floor(msg.timestamp.getTime() / 1000)
+            };
+            
+            await aiChatbotProcessor.processMessage(userId, msg.sourceDeviceId || 'unknown', chatbotData);
+            
+            // Mark as processed
+            await Message.updateOne({ _id: msg._id }, { processed: true });
+            console.log(`[BAILEYS MONITOR] Marked message ${msg._id} as processed`);
+          }
+        }
+      } catch (error) {
+        console.error(`[BAILEYS MONITOR] Error in message monitor for user ${userId}:`, error);
+      }
+    }, 15000); // Check every 15 seconds
+    
+    console.log(`[BAILEYS MONITOR] Message monitor started for user ${userId}`);
+
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
       console.log(`[Baileys] connection.update event for user ${userId}. Status: ${connection}`, { update })
