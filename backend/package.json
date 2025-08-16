@@ -5,6 +5,8 @@
   "main": "server.cjs",
   "scripts": {
     "start": "node server.cjs",
+    "dev": "cp .env.development .env && nodemon -V --ignore ./sessions_baileys/* server.cjs",
+    "prod": "cp .env.production .env && node server.cjs",
     "server": "nodemon -V --ignore ./sessions_baileys/* server.cjs",
     "test": "jest"
   },
@@ -27,14 +29,15 @@
     "mongoose": "^7.0.3",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
+    "node-cron": "^4.2.1",
     "openai": "^4.26.0",
     "puppeteer": "^21.9.0",
     "qrcode": "^1.5.3",
     "qrcode-terminal": "^0.12.0",
     "socket.io": "^4.7.4",
     "whatsapp-web.js": "^1.27.0",
-    "xlsx": "^0.18.5",
     "winston": "^3.8.2",
+    "xlsx": "^0.18.5",
     "xss-clean": "^0.1.1"
   },
   "devDependencies": {

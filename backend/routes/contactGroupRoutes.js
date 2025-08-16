@@ -8,7 +8,8 @@ const {
   deleteContactGroup,
   addContactsToGroup,
   removeContactFromGroup,
-  getContactsInGroup
+  getContactsInGroup,
+  autoCreateDefaultGroup
 } = require('../controllers/contactGroupController.js');
 const { protect } = require('../middleware/authMiddleware.js');
 
@@ -32,5 +33,8 @@ router.route('/:id/contacts')
 
 router.route('/:groupId/contacts/:contactId')
   .delete(removeContactFromGroup);
+
+// Auto-create default contact group
+router.post('/auto-create-default', autoCreateDefaultGroup);
 
 module.exports = router; 

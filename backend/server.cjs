@@ -16,6 +16,7 @@ const autoresponderRoutes = require('./routes/autoresponderRoutes.js');
 const mediaRoutes = require('./routes/mediaRoutes.js');
 const aiChatbotRoutes = require('./routes/aiChatbotRoutes.js');
 const contactGroupRoutes = require('./routes/contactGroupRoutes.js');
+const connectionRoutes = require('./routes/connectionRoutes.js');
 const {
     initializeWhatsAppService,
     getWhatsAppSocket,
@@ -76,6 +77,7 @@ app.use('/api/campaigns', campaignRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai-chatbot', aiChatbotRoutes);
 app.use('/api/contact-groups', contactGroupRoutes);
+app.use('/api/connection', connectionRoutes);
 
 // Initialize WhatsApp Service selepas io dicipta
 initializeWhatsAppService(io);
@@ -220,6 +222,15 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
+// Start campaign scheduler
+const campaignScheduler = require('./services/campaignScheduler.js');
+campaignScheduler.start();
+
+// Start connection monitor
+const connectionMonitor = require('./services/connectionMonitor.js');
+connectionMonitor.start();
+connectionMonitor.startKeepAlive();
+
 server.listen(PORT, '0.0.0.0', () => console.log(`Pelayan (termasuk WebSocket) berjalan pada port ${PORT}`));
 
 // Export io untuk digunakan di tempat lain
@@ -238,7 +249,22 @@ const gracefulShutdown = async (signal) => {
             console.log('Sambungan Socket.IO ditutup.');
         });
 
-        // 3. Bersihkan client WhatsApp (Gunakan Baileys)
+        // 3. Stop campaign scheduler and connection monitor
+        try {
+            campaignScheduler.stop();
+            console.log('Campaign scheduler stopped.');
+        } catch (error) {
+            console.error('Error stopping campaign scheduler:', error);
+        }
+
+        try {
+            connectionMonitor.stop();
+            console.log('Connection monitor stopped.');
+        } catch (error) {
+            console.error('Error stopping connection monitor:', error);
+        }
+
+        // 4. Bersihkan client WhatsApp (Gunakan Baileys)
         try {
             // await whatsappService.cleanupWhatsAppClients(); // Panggil servis lama
             // await baileysService.cleanupWhatsAppClients(); // Tidak perlu panggil melalui objek jika sudah di-destructure

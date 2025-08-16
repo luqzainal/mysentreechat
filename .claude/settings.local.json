@@ -12,7 +12,8 @@
       "Bash(rm:*)",
       "Bash(mkdir:*)",
       "Bash(find:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(cp:*)"
     ],
     "deny": []
   }

@@ -236,6 +236,19 @@ const campaignSchema = new mongoose.Schema({
       type: Number,
       default: 0
     }
+  },
+  // Scheduler fields
+  lastExecutedAt: {
+    type: Date,
+    required: false
+  },
+  lastExecutionError: {
+    type: String,
+    required: false
+  },
+  lastExecutionAttempt: {
+    type: Date,
+    required: false
   }
 }, {
   timestamps: true

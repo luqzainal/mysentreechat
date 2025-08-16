@@ -326,7 +326,20 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
 // @access  Private
 router.get('/:deviceId/:campaignId', validateDeviceAccess, async (req, res) => {
   try {
-    const campaign = await Campaign.findOne({ _id: req.params.campaignId, userId: req.user.id, deviceId: req.params.deviceId });
+    const campaign = await Campaign.findOne({ 
+      _id: req.params.campaignId, 
+      userId: req.user.id, 
+      deviceId: req.params.deviceId 
+    })
+    .populate('mediaAttachments')
+    .populate({
+      path: 'contactGroupId',
+      populate: {
+        path: 'contacts',
+        select: 'name phoneNumber'
+      }
+    });
+
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found' });
     }
@@ -609,6 +622,136 @@ router.post('/:deviceId/:campaignId/duplicate', validateDeviceAccess, async (req
     } catch (error) {
         console.error('Error duplicating campaign:', error);
         res.status(500).json({ message: 'Server Error duplicating campaign' });
+    }
+});
+
+// @desc    Execute a campaign (bulk or AI chatbot)
+// @route   POST /api/campaigns/:deviceId/:campaignId/execute
+// @access  Private
+router.post('/:deviceId/:campaignId/execute', validateDeviceAccess, async (req, res) => {
+    const { campaignId, deviceId } = req.params;
+    const userId = req.user.id;
+
+    try {
+        // Load campaign to determine type
+        const campaign = await Campaign.findOne({
+            _id: campaignId,
+            userId: userId,
+            deviceId: deviceId
+        });
+
+        if (!campaign) {
+            return res.status(404).json({ message: 'Campaign not found' });
+        }
+
+        // Import controller functions
+        const { executeCampaign } = require('../controllers/whatsappController.js');
+        
+        // Execute the campaign using the controller function
+        return await executeCampaign(req, res);
+
+    } catch (error) {
+        console.error('Error executing campaign:', error);
+        res.status(500).json({ message: 'Server Error executing campaign' });
+    }
+});
+
+// @desc    Debug endpoint - Get campaign with full details
+// @route   GET /api/campaigns/:deviceId/:campaignId/debug
+// @access  Private
+router.get('/:deviceId/:campaignId/debug', validateDeviceAccess, async (req, res) => {
+    try {
+        const campaign = await Campaign.findOne({ 
+            _id: req.params.campaignId, 
+            userId: req.user.id, 
+            deviceId: req.params.deviceId 
+        })
+        .populate('mediaAttachments')
+        .populate({
+            path: 'contactGroupId',
+            populate: {
+                path: 'contacts',
+                select: 'name phoneNumber'
+            }
+        });
+
+        if (!campaign) {
+            return res.status(404).json({ message: 'Campaign not found' });
+        }
+
+        // Get all contact groups for dropdown
+        const ContactGroup = require('../models/ContactGroup.js');
+        const allContactGroups = await ContactGroup.find({ user: req.user.id })
+            .populate('contacts', 'name phoneNumber')
+            .sort({ groupName: 1 });
+
+        res.json({
+            campaign: campaign,
+            availableContactGroups: allContactGroups.map(group => ({
+                _id: group._id,
+                groupName: group.groupName,
+                contactCount: group.contacts.length,
+                contacts: group.contacts
+            })),
+            debugInfo: {
+                campaignType: campaign.campaignType,
+                hasContactGroup: !!campaign.contactGroupId,
+                contactGroupPopulated: !!campaign.contactGroupId?.contacts,
+                contactCount: campaign.contactGroupId?.contacts?.length || 0
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching campaign debug details:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+});
+
+// @desc    Debug AI chatbot campaigns for user
+// @route   GET /api/campaigns/debug/ai-chatbot/:userId
+// @access  Private
+router.get('/debug/ai-chatbot/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Get all AI chatbot campaigns for user
+        const aiCampaigns = await Campaign.find({
+            userId: userId,
+            campaignType: 'ai_chatbot'
+        }).sort({ createdAt: -1 });
+
+        // Get only active campaigns
+        const activeCampaigns = await Campaign.find({
+            userId: userId,
+            campaignType: 'ai_chatbot',
+            status: 'enable',
+            statusEnabled: true
+        });
+
+        res.json({
+            userId: userId,
+            totalAICampaigns: aiCampaigns.length,
+            activeCampaigns: activeCampaigns.length,
+            allCampaigns: aiCampaigns.map(c => ({
+                id: c._id,
+                name: c.name || c.campaignName,
+                status: c.status,
+                statusEnabled: c.statusEnabled,
+                keywords: c.keywords,
+                type: c.type,
+                captionAi: c.captionAi,
+                createdAt: c.createdAt
+            })),
+            activeCampaignsDetails: activeCampaigns.map(c => ({
+                id: c._id,
+                name: c.name || c.campaignName,
+                keywords: c.keywords,
+                type: c.type,
+                captionAi: c.captionAi
+            }))
+        });
+    } catch (error) {
+        console.error('Error debugging AI chatbot campaigns:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
 });
 

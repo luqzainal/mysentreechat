@@ -40,6 +40,65 @@ const emit = (userId, event, data) => {
   }
 }
 
+// Function to process messages directly (shared logic)
+const processMessageDirectly = async (userId, messageUpsert) => {
+  console.log('[Baileys DEBUG] processMessageDirectly called for user', userId, 'with:', JSON.stringify(messageUpsert, null, 2));
+  
+  if (messageUpsert.type === 'notify' && messageUpsert.messages) {
+    for (const msg of messageUpsert.messages) {
+      if (msg.message && !msg.key.fromMe) {
+        console.log(`[Baileys] Processing incoming message from ${msg.key.remoteJid} for user ${userId}`);
+        
+        try {
+          // Get device ID from socket or use default
+          const deviceId = msg.key.participant?.split('@')[0] || msg.key.remoteJid?.split('@')[0] || 'unknown_device';
+          const receiverJid = `${userId}@s.whatsapp.net`;
+
+          const messageData = {
+            user: userId,
+            chatJid: msg.key.remoteJid,
+            messageId: msg.key.id,
+            body: msg.message.conversation || msg.message.extendedTextMessage?.text || JSON.stringify(msg.message) || '',
+            timestamp: new Date((parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)) * 1000),
+            fromMe: msg.key.fromMe,
+            status: 'received',
+            sourceDeviceId: deviceId
+          };
+
+          console.log(`[Baileys] Saving message to DB for user ${userId}:`, JSON.stringify(messageData));
+          const savedMessage = await Message.create(messageData);
+          console.log(`[Baileys] Message saved to DB for user ${userId}, ID: ${savedMessage._id}`);
+
+          // Emit to frontend
+          emit(userId, 'new_whatsapp_message', savedMessage);
+
+          // Process AI Chatbot campaigns
+          try {
+            const aiChatbotProcessor = require('./aiChatbotProcessor.js');
+            const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+
+            if (messageText.trim()) {
+              const chatbotData = {
+                remoteJid: msg.key.remoteJid,
+                messageText: messageText,
+                messageId: msg.key.id,
+                timestamp: parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)
+              };
+
+              await aiChatbotProcessor.processMessage(userId, deviceId, chatbotData);
+            }
+          } catch (chatbotError) {
+            console.error(`[Baileys] Error processing AI chatbot for user ${userId}:`, chatbotError);
+          }
+
+        } catch (dbError) {
+          console.error(`[Baileys] Error in processMessageDirectly for user ${userId}: ${dbError.message}`, { stack: dbError.stack });
+        }
+      }
+    }
+  }
+};
+
 async function connectToWhatsApp(userId) {
   // Isytihar pembolehubah di luar try block
   let limit = 0;
@@ -115,6 +174,16 @@ async function connectToWhatsApp(userId) {
       auth: state,
       browser: Browsers.windows('Chrome'),
       markOnlineOnConnect: false,
+      // Enable message receiving
+      getMessage: async (key) => {
+        if (store) {
+          const msg = await store.loadMessage(key.remoteJid, key.id);
+          return msg?.message || undefined;
+        }
+        return undefined;
+      },
+      // Disable full sync for faster performance
+      syncFullHistory: false,
     })
     console.log(`[Baileys] makeWASocket call completed for user ${userId}. Binding event handlers...`)
 
@@ -124,9 +193,127 @@ async function connectToWhatsApp(userId) {
     sock.ev.on('creds.update', saveCreds);
     console.log(`[Baileys] 'creds.update' handler bound for user ${userId}.`);
 
-    // ---> KEMASKINI HANDLER messages.upsert <---
+    // Create a fresh store for this socket
+    const userStore = makeInMemoryStore({ logger: baileysLogger.child({ stream: 'store' }) });
+    userStore.bind(sock.ev);
+    console.log(`[Baileys] Fresh store created and bound to socket events for user ${userId}`);
+
+    // DIRECT WebSocket message capture - hook into raw WebSocket events
+    if (sock.ws) {
+      console.log(`[Baileys DEBUG] Setting up direct WebSocket message listener for user ${userId}`);
+      
+      const originalOnMessage = sock.ws.onmessage;
+      sock.ws.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data[1] && data[1].tag === 'message' && data[1].attrs && data[1].attrs.type === 'text') {
+            console.log(`[Baileys DEBUG] Direct WebSocket text message captured for user ${userId}:`, data);
+            
+            // Extract message data from WebSocket format
+            const messageId = data[1].attrs.id;
+            const fromJid = data[1].attrs.from;
+            const messageText = data[2] || data[1].content || '';
+            
+            if (messageText && fromJid) {
+              console.log(`[Baileys DEBUG] Processing direct WebSocket message: "${messageText}" from ${fromJid}`);
+              
+              // Create synthetic message object
+              const syntheticMessage = {
+                key: {
+                  id: messageId,
+                  fromMe: false,
+                  remoteJid: fromJid
+                },
+                message: {
+                  conversation: messageText
+                },
+                messageTimestamp: Math.floor(Date.now() / 1000)
+              };
+              
+              const syntheticUpsert = {
+                messages: [syntheticMessage],
+                type: 'notify'
+              };
+              
+              // Process immediately
+              processMessageDirectly(userId, syntheticUpsert).catch(err => {
+                console.error(`[Baileys DEBUG] Error processing synthetic message:`, err);
+              });
+            }
+          }
+        } catch (parseError) {
+          // Ignore parse errors, not all WebSocket messages are JSON
+        }
+        
+        // Call original handler
+        if (originalOnMessage) {
+          originalOnMessage.call(this, event);
+        }
+      };
+    }
+
+    // Alternative event listeners for debugging
+    sock.ev.on('messages.set', (messageSet) => {
+      console.log(`[Baileys DEBUG] messages.set event received for user ${userId}:`, messageSet);
+    });
+
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+      console.log(`[Baileys DEBUG] messaging-history.set received: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} messages, isLatest: ${isLatest}`);
+      
+      // Process any incoming messages from history
+      if (messages && messages.length > 0) {
+        console.log(`[Baileys DEBUG] Processing ${messages.length} messages from history...`);
+        for (const msg of messages) {
+          if (msg.message && !msg.key.fromMe) {
+            console.log(`[Baileys DEBUG] Found incoming message in history:`, {
+              id: msg.key.id,
+              from: msg.key.remoteJid,
+              text: msg.message.conversation || msg.message.extendedTextMessage?.text
+            });
+            
+            // Process this message directly if it's recent (within last 5 minutes)
+            const messageTime = parseInt(msg.messageTimestamp) * 1000;
+            const now = Date.now();
+            if (now - messageTime < 5 * 60 * 1000) {
+              console.log(`[Baileys DEBUG] Processing recent message from history...`);
+              // Simulate messages.upsert for recent messages
+              const simulatedUpsert = {
+                messages: [msg],
+                type: 'notify'
+              };
+              // Process immediately
+              processMessageDirectly(userId, simulatedUpsert).catch(err => {
+                console.error(`[Baileys DEBUG] Error processing history message:`, err);
+              });
+            }
+          }
+        }
+      }
+    });
+
+    // ---> MAIN HANDLER messages.upsert <---
+    console.log(`[Baileys] Setting up messages.upsert handler for user ${userId}...`);
     sock.ev.on('messages.upsert', async (m) => {
-      console.log('[Baileys DEBUG] RAW messages.upsert event received:', JSON.stringify(m, null, 2));
+      console.log('[Baileys DEBUG] RAW messages.upsert event received for user', userId, ':', JSON.stringify(m, null, 2));
+      console.log(`[Baileys DEBUG] Message type: ${m.type}, Messages count: ${m.messages?.length || 0}`);
+      
+      // Process ALL message types for debugging
+      if (m.messages && m.messages.length > 0) {
+        for (const msg of m.messages) {
+          console.log(`[Baileys DEBUG] Message details:`, {
+            id: msg.key.id,
+            fromMe: msg.key.fromMe,
+            remoteJid: msg.key.remoteJid,
+            messageKeys: Object.keys(msg.message || {}),
+            hasTextContent: !!(msg.message?.conversation || msg.message?.extendedTextMessage?.text)
+          });
+        }
+      }
+      
+      // Use shared processing function
+      await processMessageDirectly(userId, m);
+      
+      // Keep original logic as fallback
       if (m.type === 'notify') {
         console.log(`[Baileys DEBUG] Received 'notify' type messages.upsert for user ${userId}. Processing messages...`);
         for (const msg of m.messages) {
@@ -141,17 +328,14 @@ async function connectToWhatsApp(userId) {
 
 
               const messageData = {
-                userId,
-                deviceId: deviceId,
+                user: userId,
+                chatJid: msg.key.remoteJid,
                 messageId: msg.key.id,
-                from: msg.key.remoteJid,
+                body: msg.message.conversation || msg.message.extendedTextMessage?.text || JSON.stringify(msg.message) || '',
+                timestamp: new Date((parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)) * 1000),
                 fromMe: msg.key.fromMe,
-                to: receiverJid, 
-                body: msg.message.conversation || msg.message.extendedTextMessage?.text || JSON.stringify(msg.message) || '', // Fallback jika tiada text
-                timestamp: parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000),
                 status: 'received',
-                type: msg.message.imageMessage ? 'image' : (msg.message.videoMessage ? 'video' : (msg.message.audioMessage ? 'audio' : (msg.message.documentMessage ? 'document' : 'chat'))), // Basic type detection
-                rawData: JSON.stringify(msg) 
+                sourceDeviceId: deviceId
               };
 
               console.log(`[Baileys] Saving message to DB for user ${userId}:`, JSON.stringify(messageData));
@@ -168,6 +352,25 @@ async function connectToWhatsApp(userId) {
               console.log(`[Baileys] Attempting to call emit function for 'new_whatsapp_message' to user ${userId}...`);
               emit(userId, 'new_whatsapp_message', savedMessage);
               console.log(`[Baileys] emit function called for 'new_whatsapp_message', user ${userId}.`);
+
+              // Process AI Chatbot campaigns
+              try {
+                const aiChatbotProcessor = require('./aiChatbotProcessor.js');
+                const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+                
+                if (messageText.trim()) {
+                  const chatbotData = {
+                    remoteJid: msg.key.remoteJid,
+                    messageText: messageText,
+                    messageId: msg.key.id,
+                    timestamp: parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)
+                  };
+                  
+                  await aiChatbotProcessor.processMessage(userId, deviceId, chatbotData);
+                }
+              } catch (chatbotError) {
+                console.error(`[Baileys] Error processing AI chatbot for user ${userId}:`, chatbotError);
+              }
 
             } catch (dbError) {
               console.error(`[Baileys] Error saving message or emitting for user ${userId}: ${dbError.message}`, { stack: dbError.stack, rawMessage: JSON.stringify(msg) });
@@ -276,6 +479,14 @@ async function connectToWhatsApp(userId) {
         console.log(`[Baileys] Connection opened successfully for user ${userId}. WA User ID: ${sock.user?.id}, Device ID: ${deviceId}, Name: ${deviceName}`)
         emit(userId, 'whatsapp_status', 'connected')
         emit(userId, 'whatsapp_qr', null)
+
+        // Reset reconnection attempts when successfully connected
+        try {
+          const connectionMonitor = require('./connectionMonitor.js');
+          connectionMonitor.resetReconnectAttempts(userId);
+        } catch (monitorError) {
+          console.warn(`[Baileys] Could not reset reconnect attempts for user ${userId}:`, monitorError.message);
+        }
 
         try {
           const deviceData = {
