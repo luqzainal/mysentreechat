@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import io from 'socket.io-client';
 import QRCode from 'react-qr-code';
 import { useAuth } from '../contexts/AuthContext';
@@ -36,6 +36,7 @@ function ScanDevicePage() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [connectedDevices, setConnectedDevices] = useState([]); // State untuk senarai peranti
   const [isDeviceListLoading, setIsDeviceListLoading] = useState(true);
+  const fetchTimeoutRef = useRef(null); // For debouncing fetchDevices
 
   const currentUserPlan = user?.membershipPlan || 'Free';
   console.log("[ScanDevicePage] User object from useAuth:", user);
@@ -59,6 +60,16 @@ function ScanDevicePage() {
           setIsDeviceListLoading(false);
       }
   }, [user]); // Dependency pada user
+
+  // Debounced version of fetchDevices
+  const debouncedFetchDevices = useCallback(() => {
+      if (fetchTimeoutRef.current) {
+          clearTimeout(fetchTimeoutRef.current);
+      }
+      fetchTimeoutRef.current = setTimeout(() => {
+          fetchDevices();
+      }, 1000); // Wait 1 second before fetching
+  }, [fetchDevices]);
 
   // useEffect untuk fetch devices pada muatan awal dan bila fetchDevices berubah
   useEffect(() => {
@@ -104,16 +115,27 @@ function ScanDevicePage() {
     });
     socket.on('whatsapp_status', (status) => {
       console.log("[ScanDevicePage] WhatsApp status received from backend:", status);
-      setConnectionStatus(status); // Ini masih okay untuk set state di sini
+      setConnectionStatus(prevStatus => {
+        // Only update if status actually changed to prevent unnecessary re-renders
+        if (prevStatus === status) return prevStatus;
+        return status;
+      });
       if (status !== 'waiting_qr') setRawQrString(null);
       if (status === 'connected' || status === 'disconnected' || status === 'limit_reached') {
-          fetchDevices(); 
+          // Use debounced version to prevent rapid updates
+          debouncedFetchDevices();
       }
     });
     socket.on('whatsapp_qr', (qrString) => {
       console.log("[ScanDevicePage] WhatsApp QR string received from backend:", qrString ? qrString.substring(0,30) + '...' : 'EMPTY_QR_STRING');
-      setRawQrString(qrString);
-      setConnectionStatus('waiting_qr');
+      setRawQrString(prevQr => {
+        // Only update if QR actually changed
+        if (prevQr === qrString) return prevQr;
+        return qrString;
+      });
+      if (qrString) {
+        setConnectionStatus('waiting_qr');
+      }
     });
     socket.on('error_message', (message) => {
       console.error("[ScanDevicePage] Error message from backend:", message);
@@ -136,16 +158,23 @@ function ScanDevicePage() {
           socket = null;
       }
     };
-  }, [user?._id, fetchDevices]);
+  }, [user?._id, debouncedFetchDevices]); // Include debouncedFetchDevices
 
   useEffect(() => {
     if (user?._id) {
         // Panggil connectSocket, yang akan mengembalikan fungsi cleanup
         const cleanupSocket = connectSocket();
         // Kembalikan fungsi cleanup ini dari useEffect
-        return cleanupSocket;
+        return () => {
+            // Clear any pending fetch timeout
+            if (fetchTimeoutRef.current) {
+                clearTimeout(fetchTimeoutRef.current);
+            }
+            // Clean up socket
+            if (cleanupSocket) cleanupSocket();
+        };
     }
-  }, [user?._id, connectSocket]); // connectSocket kini lebih stabil
+  }, [user?._id]); // Remove connectSocket dependency to prevent recreation
 
   const handleConnectRequest = () => {
     const currentActiveDeviceCount = connectedDevices.filter(d => d.connected).length;
