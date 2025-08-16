@@ -173,6 +173,14 @@ class AIChatbotProcessor {
                 return false;
             }
 
+            // Force set presence to available before sending response
+            try {
+                await sock.sendPresenceUpdate('available');
+                console.log(`[AIChatbotProcessor] Set presence to available for user ${userId}`);
+            } catch (presenceError) {
+                console.warn(`[AIChatbotProcessor] Failed to set presence, continuing anyway:`, presenceError.message);
+            }
+
             // Process response message with spintax
             let responseText = processSpintax(campaign.captionAi || campaign.caption || 'Hello! How can I help you?');
 
