@@ -14,6 +14,33 @@ router.post('/bulk', protect, sendBulkMessage);
 router.get('/chat/:phoneNumber', protect, getChatHistory);
 router.post('/send', protect, sendMessage);
 
+// Debug endpoint untuk check AI campaigns
+router.get('/debug/ai-campaigns', protect, async (req, res) => {
+    try {
+        const Campaign = require('../models/Campaign.js');
+        const campaigns = await Campaign.find({ 
+            userId: req.user.id, 
+            type: 'ai_chatbot',
+            status: 'executed'
+        });
+        
+        res.json({
+            success: true,
+            count: campaigns.length,
+            campaigns: campaigns.map(c => ({
+                id: c._id,
+                name: c.name,
+                keywords: c.keywords,
+                status: c.status,
+                executedAt: c.executedAt,
+                lastExecutedAt: c.lastExecutedAt
+            }))
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // @desc    Get list of connected devices for the user
 // @route   GET /api/whatsapp/devices
 // @access  Private
