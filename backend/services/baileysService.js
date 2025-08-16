@@ -294,8 +294,9 @@ async function connectToWhatsApp(userId) {
     // ---> MAIN HANDLER messages.upsert <---
     console.log(`[Baileys] Setting up messages.upsert handler for user ${userId}...`);
     sock.ev.on('messages.upsert', async (m) => {
-      console.log('[Baileys DEBUG] RAW messages.upsert event received for user', userId, ':', JSON.stringify(m, null, 2));
-      console.log(`[Baileys DEBUG] Message type: ${m.type}, Messages count: ${m.messages?.length || 0}`);
+      console.log('[BAILEYS CRITICAL] messages.upsert event triggered for user', userId);
+      console.log('[BAILEYS CRITICAL] RAW messages.upsert data:', JSON.stringify(m, null, 2));
+      console.log(`[BAILEYS CRITICAL] Message type: ${m.type}, Messages count: ${m.messages?.length || 0}`);
       
       // Process ALL message types for debugging
       if (m.messages && m.messages.length > 0) {
@@ -409,6 +410,13 @@ async function connectToWhatsApp(userId) {
     });
     console.log(`[Baileys] 'messaging-history.set' handler bound for user ${userId}.`); // Log Pengesahan
     // ---> AKHIR TAMBAHAN HANDLER DEBUG <---
+
+    // Add general message logging
+    sock.ev.on('*', (event, ...args) => {
+      if (event.includes('message') || event.includes('receipt')) {
+        console.log(`[BAILEYS EVENT] Event '${event}' triggered for user ${userId}:`, args);
+      }
+    });
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
