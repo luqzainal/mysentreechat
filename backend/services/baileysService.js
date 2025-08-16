@@ -661,6 +661,25 @@ async function connectToWhatsApp(userId) {
     
     console.log(`[BAILEYS MONITOR] Message monitor started for user ${userId}`);
 
+    // Keep WhatsApp presence active for AI chatbot
+    const keepPresenceActive = setInterval(async () => {
+      try {
+        if (!clients.has(userId)) {
+          console.log(`[BAILEYS PRESENCE] Client no longer exists for user ${userId}, clearing presence keeper`);
+          clearInterval(keepPresenceActive);
+          return;
+        }
+        
+        // Send available presence every 30 seconds
+        await sock.sendPresenceUpdate('available');
+        console.log(`[BAILEYS PRESENCE] Sent available presence for user ${userId}`);
+      } catch (error) {
+        console.error(`[BAILEYS PRESENCE] Error updating presence for user ${userId}:`, error);
+      }
+    }, 30000); // Every 30 seconds
+    
+    console.log(`[BAILEYS PRESENCE] Presence keeper started for user ${userId}`);
+
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
       console.log(`[Baileys] connection.update event for user ${userId}. Status: ${connection}`, { update })
