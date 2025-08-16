@@ -9,6 +9,50 @@ const pino = require('pino')
 
 const PLAN_LIMITS = { Free: 1, Basic: 2, Pro: 5, default: 1 }
 
+// Helper function to process incoming messages
+const processIncomingMessage = async (userId, msg) => {
+  try {
+    console.log(`[processIncomingMessage] Processing message for user ${userId}, ID: ${msg.key.id}`);
+    
+    const deviceId = msg.key.remoteJid?.split('@')[0] || 'unknown';
+    
+    // Save to database
+    const messageData = {
+      user: userId,
+      chatJid: msg.key.remoteJid,
+      messageId: msg.key.id,
+      body: msg.message.conversation || msg.message.extendedTextMessage?.text || '',
+      timestamp: new Date((parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)) * 1000),
+      fromMe: msg.key.fromMe,
+      status: 'received',
+      sourceDeviceId: deviceId
+    };
+
+    console.log(`[processIncomingMessage] Saving message to DB:`, messageData);
+    const savedMessage = new Message(messageData);
+    await savedMessage.save();
+    console.log(`[processIncomingMessage] Message saved to DB with ID: ${savedMessage._id}`);
+
+    // Process AI Chatbot
+    const aiChatbotProcessor = require('./aiChatbotProcessor.js');
+    const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    
+    if (messageText.trim()) {
+      const chatbotData = {
+        messageId: msg.key.id,
+        chatJid: msg.key.remoteJid,
+        messageText: messageText,
+        timestamp: parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)
+      };
+      
+      console.log(`[processIncomingMessage] Processing AI chatbot for text: "${messageText}"`);
+      await aiChatbotProcessor.processMessage(userId, deviceId, chatbotData);
+    }
+  } catch (error) {
+    console.error(`[processIncomingMessage] Error:`, error);
+  }
+};
+
 const clients = new Map() // Map<userId, socket>
 let ioGlobal = null
 
@@ -388,6 +432,45 @@ async function connectToWhatsApp(userId) {
     });
     console.log(`[Baileys] 'messages.upsert' handler bound for user ${userId}.`);
 
+    // Alternative message capture - handle all message types
+    sock.ev.on('messages.set', async (messageSet) => {
+      console.log(`[BAILEYS ALTERNATIVE] messages.set event for user ${userId}:`, JSON.stringify(messageSet, null, 2));
+    });
+
+    // Try to capture chats update with messages
+    sock.ev.on('chats.update', async (chatsUpdate) => {
+      console.log(`[BAILEYS ALTERNATIVE] chats.update event for user ${userId}:`, JSON.stringify(chatsUpdate, null, 2));
+    });
+
+    // Direct WebSocket message interception as backup
+    if (sock.ws) {
+      const originalOnMessage = sock.ws.onmessage;
+      sock.ws.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data[0] === 'message' && data[1] && data[1].message) {
+            console.log(`[BAILEYS WEBSOCKET] Raw WebSocket message intercepted for user ${userId}:`, JSON.stringify(data[1], null, 2));
+            
+            // Process immediately for AI chatbot
+            const msg = data[1];
+            if (!msg.key.fromMe && msg.message) {
+              console.log(`[BAILEYS WEBSOCKET] Processing incoming message immediately...`);
+              processIncomingMessage(userId, msg).catch(err => {
+                console.error(`[BAILEYS WEBSOCKET] Error processing message:`, err);
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore parsing errors
+        }
+        
+        // Call original handler
+        if (originalOnMessage) {
+          originalOnMessage.call(this, event);
+        }
+      };
+    }
+
     // ---> TAMBAH HANDLER DEBUG BARU <---
     sock.ev.on('messages.update', async (m) => {
         console.log('[Baileys DEBUG] RAW messages.update event received:', JSON.stringify(m, null, 2));
@@ -411,10 +494,11 @@ async function connectToWhatsApp(userId) {
     console.log(`[Baileys] 'messaging-history.set' handler bound for user ${userId}.`); // Log Pengesahan
     // ---> AKHIR TAMBAHAN HANDLER DEBUG <---
 
-    // Add general message logging
+    // Add comprehensive event logging
     sock.ev.on('*', (event, ...args) => {
-      if (event.includes('message') || event.includes('receipt')) {
-        console.log(`[BAILEYS EVENT] Event '${event}' triggered for user ${userId}:`, args);
+      console.log(`[BAILEYS ALL EVENTS] Event '${event}' triggered for user ${userId}`);
+      if (event.includes('message') || event.includes('receipt') || event.includes('notify')) {
+        console.log(`[BAILEYS EVENT] Event '${event}' triggered for user ${userId} with data:`, JSON.stringify(args, null, 2));
       }
     });
 
