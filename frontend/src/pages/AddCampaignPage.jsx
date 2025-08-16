@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox"; // Import Checkbox
 import { toast } from "sonner";
 import api from '../services/api'; // Import API service
-import { Loader2, Users, Image as ImageIcon, Video as VideoIcon, Clock, FileText, UploadCloud, ListChecks, Type as TypeIcon, Smile as SmileIcon, Settings2 as Settings2Icon, Link2 as Link2Icon } from 'lucide-react'; // Import Loader & Ikon baru
+import { Loader2, Users, Image as ImageIcon, Video as VideoIcon, Clock, FileText, Type as TypeIcon, Smile as SmileIcon, Settings2 as Settings2Icon, Link2 as Link2Icon } from 'lucide-react'; // Import Loader & Ikon baru
 import {
   Select,
   SelectContent,
@@ -105,6 +105,7 @@ function AddCampaignPage() {
     saveData: 'no_save_response',
     apiRestDataStatus: 'disabled',
     mediaFileAi: null, // Untuk fail media AI chatbot
+    selectedMediaFromLibrary: null, // Untuk media dari library
     captionAi: '',
     useAiFeature: 'not_use_ai',
     aiSpintax: '',
@@ -338,8 +339,11 @@ function AddCampaignPage() {
 
   const handleAiMediaFileChange = (e) => { // Untuk AI Chatbot
     const newFile = e.target.files[0] || null;
-    setAiChatbotFormData(prev => ({ ...prev, mediaFileAi: newFile }));
-    // Jika AI chatbot guna media library, logik sama seperti bulk mungkin perlu
+    setAiChatbotFormData(prev => ({ 
+      ...prev, 
+      mediaFileAi: newFile,
+      selectedMediaFromLibrary: newFile ? null : prev.selectedMediaFromLibrary // Clear library selection if new file uploaded
+    }));
   };
 
   const handleMediaLibrarySelect = (mediaItem) => {
@@ -348,23 +352,45 @@ function AddCampaignPage() {
       if (isAlreadySelected) {
         return prevSelected.filter(item => item._id !== mediaItem._id);
       } else {
-        if (prevSelected.length < 3) { return [...prevSelected, mediaItem]; }
-        else { toast.info("Max 3 media items."); return prevSelected; }
+        if (determinedCampaignType === 'ai_chatbot') {
+          // AI chatbot: hanya 1 media item
+          return [mediaItem];
+        } else {
+          // Bulk campaign: hingga 3 media items
+          if (prevSelected.length < 3) { return [...prevSelected, mediaItem]; }
+          else { toast.info("Max 3 media items."); return prevSelected; }
+        }
       }
     });
   };
 
   const handleConfirmMediaSelection = () => {
-    setSelectedMediaItems(tempSelectedMediaInDialog);
-    setIsMediaLibraryOpen(false);
-    if (tempSelectedMediaInDialog.length > 0 && formData.mediaFile) {
-        setFormData(prev => ({ ...prev, mediaFile: null }));
-        if (fileInputRef.current) { fileInputRef.current.value = ""; }
+    if (determinedCampaignType === 'ai_chatbot') {
+      // Untuk AI chatbot: simpan media dalam aiChatbotFormData dan clear file upload
+      if (tempSelectedMediaInDialog.length > 0) {
+        const selectedMedia = tempSelectedMediaInDialog[0];
+        setAiChatbotFormData(prev => ({ ...prev, selectedMediaFromLibrary: selectedMedia, mediaFileAi: null }));
+        if (aiMediaFileInputRef.current) { aiMediaFileInputRef.current.value = ""; }
+      }
+    } else {
+      // Untuk bulk campaign: logik asal
+      setSelectedMediaItems(tempSelectedMediaInDialog);
+      if (tempSelectedMediaInDialog.length > 0 && formData.mediaFile) {
+          setFormData(prev => ({ ...prev, mediaFile: null }));
+          if (fileInputRef.current) { fileInputRef.current.value = ""; }
+      }
     }
+    setIsMediaLibraryOpen(false);
   };
 
   const handleCancelMediaSelection = () => setIsMediaLibraryOpen(false);
   const openMediaLibrary = () => { setTempSelectedMediaInDialog([...selectedMediaItems]); setIsMediaLibraryOpen(true); };
+  
+  // Fungsi untuk buka Media Library modal
+  const handleOpenMediaStorage = () => {
+    setTempSelectedMediaInDialog([]);
+    setIsMediaLibraryOpen(true);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -414,9 +440,12 @@ function AddCampaignPage() {
         Object.keys(aiChatbotFormData).forEach(key => {
             if (key === 'mediaFileAi' && aiChatbotFormData[key]) {
                 dataPayload.append('mediaFileAi', aiChatbotFormData[key]);
+            } else if (key === 'selectedMediaFromLibrary' && aiChatbotFormData[key]) {
+                // Hantar ID media dari library untuk backend guna
+                dataPayload.append('selectedMediaLibraryId', aiChatbotFormData[key]._id);
             } else if (fieldMapping[key]) {
                 dataPayload.append(fieldMapping[key], aiChatbotFormData[key]);
-            } else if (key !== 'mediaFileAi') {
+            } else if (key !== 'mediaFileAi' && key !== 'selectedMediaFromLibrary') {
                 dataPayload.append(key, aiChatbotFormData[key]);
             }
         });
@@ -936,7 +965,7 @@ function AddCampaignPage() {
                     <div className="flex items-center space-x-2"><RadioGroupItem value="enabled" id="ai-apiRestDataStatus-enabled" /><Label htmlFor="ai-apiRestDataStatus-enabled">Enabled</Label></div>
                     </RadioGroup>
                     <Button type="button" variant="outline" size="sm" disabled={aiChatbotFormData.apiRestDataStatus === 'disabled'}>
-                    <FileText className="mr-2 h-4 w-4" /> Configure API
+                    <Settings2Icon className="mr-2 h-4 w-4" /> Configure API
                     </Button>
                 </div>
                 </div>
@@ -947,16 +976,24 @@ function AddCampaignPage() {
                 <div className="flex items-center space-x-2 border p-2 rounded-md">
                     <Input id="ai-mediaFileAi" type="file" onChange={handleAiMediaFileChange} className="hidden" ref={aiMediaFileInputRef} />
                     <Button type="button" variant="outline" onClick={() => aiMediaFileInputRef.current && aiMediaFileInputRef.current.click()} className="flex-grow justify-start text-muted-foreground">
-                        {aiChatbotFormData.mediaFileAi ? aiChatbotFormData.mediaFileAi.name : "SELECT MEDIA FILE"}
+                        {aiChatbotFormData.mediaFileAi 
+                          ? aiChatbotFormData.mediaFileAi.name 
+                          : aiChatbotFormData.selectedMediaFromLibrary 
+                            ? aiChatbotFormData.selectedMediaFromLibrary.originalName || aiChatbotFormData.selectedMediaFromLibrary.fileName
+                            : "SELECT MEDIA FILE"
+                        }
                     </Button>
-                    {/* Butang File Manager, Upload, List Checks - mungkin memerlukan implementasi tambahan jika bukan sekadar UI */} 
-                    <Button type="button" variant="ghost" size="icon" title="Open File Manager (Not implemented)"><ImageIcon className="h-5 w-5" /></Button>
-                    <Button type="button" variant="ghost" size="icon" title="Direct Upload (Not implemented)"><UploadCloud className="h-5 w-5" /></Button>
-                    <Button type="button" variant="ghost" size="icon" title="View Options (Not implemented)"><ListChecks className="h-5 w-5" /></Button>
+                    {/* Butang Media Storage */} 
+                    <Button type="button" variant="ghost" size="icon" title="Open Media Library" onClick={handleOpenMediaStorage}><ImageIcon className="h-5 w-5" /></Button>
                 </div>
                 {aiChatbotFormData.mediaFileAi && (
                     <div className="mt-2 text-sm text-muted-foreground">
-                    Selected for AI: {aiChatbotFormData.mediaFileAi.name} ({(aiChatbotFormData.mediaFileAi.size / 1024).toFixed(2)} KB)
+                    Selected file: {aiChatbotFormData.mediaFileAi.name} ({(aiChatbotFormData.mediaFileAi.size / 1024).toFixed(2)} KB)
+                    </div>
+                )}
+                {aiChatbotFormData.selectedMediaFromLibrary && (
+                    <div className="mt-2 text-sm text-muted-foreground">
+                    Selected from library: {aiChatbotFormData.selectedMediaFromLibrary.originalName || aiChatbotFormData.selectedMediaFromLibrary.fileName}
                     </div>
                 )}
                 </div>
@@ -1016,14 +1053,18 @@ function AddCampaignPage() {
         </CardFooter>
       </form>
 
-      {/* Media Library Dialog (Untuk Bulk Campaign) */}
-      {determinedCampaignType === 'bulk' && (
-        <Dialog open={isMediaLibraryOpen} onOpenChange={setIsMediaLibraryOpen}>
-            <DialogContent className="max-w-3xl">
-            <DialogHeader>
-                <DialogTitle>Media Library</DialogTitle>
-                <DialogDescription>Select up to 3 media items for your campaign. Upload new files via the Media Storage page.</DialogDescription>
-            </DialogHeader>
+      {/* Media Library Dialog (Untuk Bulk Campaign & AI Chatbot) */}
+      <Dialog open={isMediaLibraryOpen} onOpenChange={setIsMediaLibraryOpen}>
+          <DialogContent className="max-w-3xl">
+          <DialogHeader>
+              <DialogTitle>Media Library</DialogTitle>
+              <DialogDescription>
+                {determinedCampaignType === 'ai_chatbot' 
+                  ? 'Select 1 media item for your AI chatbot campaign. Upload new files via the Media Storage page.'
+                  : 'Select up to 3 media items for your campaign. Upload new files via the Media Storage page.'
+                }
+              </DialogDescription>
+          </DialogHeader>
             {userMediaList.length === 0 ? (
                 <p className="py-4 text-center text-muted-foreground">No media found in your storage. <Link to="/media-storage" className="text-primary hover:underline">Upload now</Link>.</p>
             ) : (
@@ -1058,7 +1099,6 @@ function AddCampaignPage() {
             </DialogFooter>
             </DialogContent>
         </Dialog>
-      )}
     </div>
   );
 }
