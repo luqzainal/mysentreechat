@@ -522,8 +522,31 @@ async function connectToWhatsApp(userId) {
     console.log(`[BAILEYS SETUP] Setting up * (wildcard) event handler for user ${userId}...`);
     sock.ev.on('*', (event, ...args) => {
       console.log(`[BAILEYS ALL EVENTS] Event '${event}' triggered for user ${userId}`);
+      
+      // FORCE MESSAGE CAPTURE from raw logs
       if (event.includes('message') || event.includes('receipt') || event.includes('notify')) {
         console.log(`[BAILEYS EVENT] Event '${event}' triggered for user ${userId} with data:`, JSON.stringify(args, null, 2));
+        
+        // Try to extract message data from any event
+        try {
+          const eventData = args[0];
+          if (eventData && typeof eventData === 'object') {
+            // Check for message-like structure
+            if (eventData.messages && Array.isArray(eventData.messages)) {
+              console.log(`[BAILEYS FORCE] Found messages in event data, processing...`);
+              eventData.messages.forEach(msg => {
+                if (msg.message && !msg.key.fromMe) {
+                  console.log(`[BAILEYS FORCE] Processing incoming message:`, msg.key.id);
+                  processIncomingMessage(userId, msg).catch(err => {
+                    console.error(`[BAILEYS FORCE] Error processing message:`, err);
+                  });
+                }
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`[BAILEYS FORCE] Error in force message capture:`, error);
+        }
       }
     });
     console.log(`[BAILEYS SETUP] * (wildcard) event handler bound for user ${userId}`);
