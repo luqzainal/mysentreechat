@@ -56,6 +56,59 @@ const processIncomingMessage = async (userId, msg) => {
 const clients = new Map() // Map<userId, socket>
 let ioGlobal = null
 
+// Custom logger to intercept Baileys messages
+const createCustomLogger = (userId) => {
+  const originalLogger = pino({ level: 'debug' });
+  
+  // Override the debug method to intercept message logs
+  const originalDebug = originalLogger.debug.bind(originalLogger);
+  originalLogger.debug = function(...args) {
+    try {
+      // Check if this is a message-related log
+      const logData = args[0];
+      if (logData && typeof logData === 'object') {
+        // Look for incoming message patterns
+        if (logData.recv && logData.recv.tag === 'message' && 
+            logData.recv.attrs && logData.recv.attrs.from && 
+            logData.recv.attrs.type === 'text') {
+          
+          console.log(`[BAILEYS LOG INTERCEPT] Detected incoming text message for user ${userId}:`, logData.recv.attrs);
+          
+          // Extract message data and trigger AI processing
+          const messageAttrs = logData.recv.attrs;
+          
+          // Create message data structure
+          const messageData = {
+            messageId: messageAttrs.id,
+            chatJid: messageAttrs.from,
+            messageText: 'Intercepted Message', // We'll get actual text from database later
+            timestamp: parseInt(messageAttrs.t)
+          };
+          
+          console.log(`[BAILEYS LOG INTERCEPT] Processing intercepted message for AI chatbot...`);
+          
+          // Process with AI chatbot immediately
+          setTimeout(async () => {
+            try {
+              const aiChatbotProcessor = require('./aiChatbotProcessor.js');
+              await aiChatbotProcessor.processMessage(userId, 'intercepted', messageData);
+            } catch (error) {
+              console.error(`[BAILEYS LOG INTERCEPT] Error processing intercepted message:`, error);
+            }
+          }, 1000); // Small delay to ensure message is received
+        }
+      }
+    } catch (error) {
+      console.error(`[BAILEYS LOG INTERCEPT] Error in message interception:`, error);
+    }
+    
+    // Call original debug method
+    return originalDebug(...args);
+  };
+  
+  return originalLogger;
+};
+
 const baileysLogger = pino({ level: 'debug' })
 
 const getAuth = async (userId) => {
@@ -211,9 +264,11 @@ async function connectToWhatsApp(userId) {
   let sock
   try {
     console.log(`[Baileys] Calling makeWASocket for user ${userId}...`)
+    const customLogger = createCustomLogger(userId);
+    
     sock = makeWASocket({
       version,
-      logger: baileysLogger,
+      logger: customLogger,
       printQRInTerminal: true,
       auth: state,
       browser: Browsers.windows('Chrome'),
