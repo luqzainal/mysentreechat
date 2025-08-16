@@ -13,7 +13,8 @@
       "Bash(mkdir:*)",
       "Bash(find:*)",
       "Bash(chmod:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }
