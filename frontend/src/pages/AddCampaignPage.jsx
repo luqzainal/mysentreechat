@@ -180,7 +180,16 @@ function AddCampaignPage() {
         
         setDevicesList(fetchedDevices);
         if(determinedCampaignType === 'bulk') {
-          setContactGroupsList(groupsResponse.data || []);
+          // Map contact groups to match frontend expectations
+          console.log('[AddCampaignPage] Raw contact groups from API:', groupsResponse.data);
+          const mappedContactGroups = (groupsResponse.data || []).map(group => ({
+            _id: group._id,
+            name: group.groupName, // Map groupName to name
+            count: group.contactCount, // Map contactCount to count
+            contacts: group.contacts || []
+          }));
+          console.log('[AddCampaignPage] Mapped contact groups:', mappedContactGroups);
+          setContactGroupsList(mappedContactGroups);
           setUserMediaList(mediaResponse.data || []);
         }
         
@@ -249,7 +258,11 @@ function AddCampaignPage() {
                   caption: campaignData.caption || '',
                   // Polulate field lain yang relevan untuk bulk dari campaignData
               });
-              setSelectedContactGroupId(campaignData.contactGroupId || '');
+              // Handle contactGroupId - could be ObjectId string or populated object
+              const contactGroupId = typeof campaignData.contactGroupId === 'object' && campaignData.contactGroupId?._id 
+                ? campaignData.contactGroupId._id 
+                : campaignData.contactGroupId || '';
+              setSelectedContactGroupId(contactGroupId);
               setScheduledAt(formatDateForInput(campaignData.scheduledAt));
               setMinInterval(String(campaignData.minIntervalSeconds || '5'));
               setMaxInterval(String(campaignData.maxIntervalSeconds || '10'));
@@ -635,7 +648,30 @@ function AddCampaignPage() {
 
                 {/* Kumpulan Kenalan */}
                 <div className="space-y-2">
-                    <Label htmlFor="contactGroupId">Contact Group <span className="text-red-500">*</span></Label>
+                    <div className="flex items-center justify-between">
+                        <Label htmlFor="contactGroupId">Contact Group <span className="text-red-500">*</span></Label>
+                        <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={async () => {
+                                try {
+                                    const groupsResponse = await api.get('/contact-groups');
+                                    const mappedContactGroups = (groupsResponse.data || []).map(group => ({
+                                        _id: group._id,
+                                        name: group.groupName,
+                                        count: group.contactCount,
+                                        contacts: group.contacts || []
+                                    }));
+                                    setContactGroupsList(mappedContactGroups);
+                                    toast.success('Contact groups refreshed');
+                                } catch (error) {
+                                    toast.error('Failed to refresh contact groups');
+                                }
+                            }}
+                        >
+                            Refresh
+                        </Button>
+                    </div>
                     <Select onValueChange={setSelectedContactGroupId} value={selectedContactGroupId} required>
                         <SelectTrigger id="contactGroupId">
                         <SelectValue placeholder="Select contact group...">
@@ -649,7 +685,38 @@ function AddCampaignPage() {
                         </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                        {contactGroupsList.length === 0 && <p className="p-2 text-sm text-muted-foreground">No contact groups found.</p>}
+                        {contactGroupsList.length === 0 && (
+                          <div className="p-2 text-sm text-muted-foreground space-y-2">
+                            <p>No contact groups found.</p>
+                            <Button 
+                              size="sm" 
+                              className="w-full"
+                              onClick={async () => {
+                                try {
+                                  const response = await api.post('/contact-groups/auto-create-default');
+                                  toast.success(response.data.message);
+                                  // Refresh contact groups list
+                                  const groupsResponse = await api.get('/contact-groups');
+                                  const mappedContactGroups = (groupsResponse.data || []).map(group => ({
+                                    _id: group._id,
+                                    name: group.groupName,
+                                    count: group.contactCount,
+                                    contacts: group.contacts || []
+                                  }));
+                                  setContactGroupsList(mappedContactGroups);
+                                  // Auto-select the created group
+                                  if (response.data.group) {
+                                    setSelectedContactGroupId(response.data.group._id);
+                                  }
+                                } catch (error) {
+                                  toast.error(error.response?.data?.message || 'Failed to create default group');
+                                }
+                              }}
+                            >
+                              Create Default Group
+                            </Button>
+                          </div>
+                        )}
                         {contactGroupsList.map(group => (
                             <SelectItem key={group._id} value={group._id}>{group.name} ({group.count} contacts)</SelectItem>
                         ))}

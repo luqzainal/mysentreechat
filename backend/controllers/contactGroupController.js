@@ -31,8 +31,21 @@ const createContactGroup = async (req, res) => {
 // @access  Private
 const getContactGroups = async (req, res) => {
   try {
-    const contactGroups = await ContactGroup.find({ user: req.user._id }).sort({ groupName: 1 });
-    res.json(contactGroups);
+    const contactGroups = await ContactGroup.find({ user: req.user._id })
+      .populate('contacts', 'name phoneNumber')
+      .sort({ groupName: 1 });
+    
+    // Format response with contact count for each group
+    const formattedGroups = contactGroups.map(group => ({
+      _id: group._id,
+      groupName: group.groupName,
+      contactCount: group.contacts.length,
+      contacts: group.contacts,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt
+    }));
+
+    res.json(formattedGroups);
   } catch (error) {
     console.error('Ralat mendapatkan kumpulan kenalan:', error);
     res.status(500).json({ message: 'Ralat pelayan.' });
@@ -251,6 +264,67 @@ const getContactsInGroup = async (req, res) => {
   }
 };
 
+// @desc    Auto-create default contact group with all user contacts
+// @route   POST /api/contact-groups/auto-create-default
+// @access  Private
+const autoCreateDefaultGroup = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const defaultGroupName = 'All Contacts';
+
+    // Check if default group already exists
+    let defaultGroup = await ContactGroup.findOne({ 
+      user: userId, 
+      groupName: defaultGroupName 
+    });
+
+    if (!defaultGroup) {
+      // Create default group
+      defaultGroup = new ContactGroup({
+        groupName: defaultGroupName,
+        user: userId,
+      });
+      await defaultGroup.save();
+      console.log(`[autoCreateDefaultGroup] Created default group for user ${userId}`);
+    }
+
+    // Get all user contacts
+    const allUserContacts = await Contact.find({ user: userId });
+    
+    if (allUserContacts.length === 0) {
+      return res.status(400).json({ 
+        message: 'No contacts found. Please add contacts first.' 
+      });
+    }
+
+    // Add all contacts to default group (avoid duplicates)
+    const existingContactIds = defaultGroup.contacts.map(id => id.toString());
+    const newContactIds = allUserContacts
+      .filter(contact => !existingContactIds.includes(contact._id.toString()))
+      .map(contact => contact._id);
+
+    if (newContactIds.length > 0) {
+      defaultGroup.contacts.push(...newContactIds);
+      defaultGroup.contactCount = defaultGroup.contacts.length;
+      await defaultGroup.save();
+    }
+
+    // Return populated group
+    const populatedGroup = await ContactGroup.findById(defaultGroup._id).populate('contacts');
+
+    res.json({
+      message: `Default group '${defaultGroupName}' ready with ${populatedGroup.contacts.length} contacts`,
+      group: populatedGroup,
+      contactsAdded: newContactIds.length,
+      totalContacts: populatedGroup.contacts.length
+    });
+
+  } catch (error) {
+    console.error('Error auto-creating default contact group:', error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
 module.exports = {
   createContactGroup,
   getContactGroups,
@@ -259,5 +333,6 @@ module.exports = {
   deleteContactGroup,
   addContactsToGroup,
   removeContactFromGroup,
-  getContactsInGroup
+  getContactsInGroup,
+  autoCreateDefaultGroup
 }; 

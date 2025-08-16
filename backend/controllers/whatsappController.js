@@ -1,6 +1,9 @@
 const Contact = require('../models/Contact.js');
+const ContactGroup = require('../models/ContactGroup.js');
 const Message = require('../models/Message.js');
 const Campaign = require('../models/Campaign.js');
+const Media = require('../models/Media.js');
+const WhatsappDevice = require('../models/WhatsappDevice.js');
 const baileysService = require('../services/baileysService.js');
 const { processSpintax } = require('../utils/spintaxUtils.js');
 
@@ -265,6 +268,321 @@ const getChats = async (req, res) => {
     }
 };
 
+// @desc    Execute bulk campaign - send messages to all contacts in contact group
+// @route   POST /api/campaigns/:deviceId/:campaignId/execute
+// @access  Private
+const executeBulkCampaign = async (req, res) => {
+  const { campaignId, deviceId } = req.params;
+  const userId = req.user._id.toString();
+
+  try {
+    // Load campaign details
+    const campaign = await Campaign.findOne({
+      _id: campaignId,
+      userId: userId,
+      deviceId: deviceId,
+      campaignType: 'bulk'
+    }).populate('mediaAttachments');
+
+    if (!campaign) {
+      return res.status(404).json({ message: 'Bulk campaign not found' });
+    }
+
+    if (!campaign.statusEnabled) {
+      return res.status(400).json({ message: 'Campaign is disabled' });
+    }
+
+    // Check if WhatsApp is connected
+    const sock = baileysService.getWhatsAppSocket(userId);
+    if (!sock || !sock.user) {
+      return res.status(400).json({ 
+        message: 'WhatsApp connection is not active. Please connect first.' 
+      });
+    }
+
+    // Load contact group and contacts
+    let contactGroup = await ContactGroup.findOne({
+      _id: campaign.contactGroupId,
+      user: userId
+    }).populate('contacts');
+
+    if (!contactGroup) {
+      return res.status(400).json({ 
+        message: 'Contact group not found' 
+      });
+    }
+
+    // If contact group exists but has no contacts, try to auto-assign all user contacts
+    if (!contactGroup.contacts || contactGroup.contacts.length === 0) {
+      console.log(`[executeBulkCampaign] Contact group ${contactGroup.groupName} is empty. Auto-assigning all user contacts...`);
+      
+      // Get all user contacts
+      const allUserContacts = await Contact.find({ user: userId });
+      
+      if (allUserContacts.length === 0) {
+        return res.status(400).json({ 
+          message: 'No contacts found. Please add contacts first.' 
+        });
+      }
+
+      // Add all contacts to the group
+      contactGroup.contacts = allUserContacts.map(contact => contact._id);
+      contactGroup.contactCount = allUserContacts.length;
+      await contactGroup.save();
+      
+      // Reload with populated contacts
+      contactGroup = await ContactGroup.findOne({
+        _id: campaign.contactGroupId,
+        user: userId
+      }).populate('contacts');
+
+      console.log(`[executeBulkCampaign] Auto-assigned ${allUserContacts.length} contacts to group ${contactGroup.groupName}`);
+    }
+
+    const contacts = contactGroup.contacts;
+    const minInterval = campaign.minIntervalSeconds || 5;
+    const maxInterval = campaign.maxIntervalSeconds || 10;
+
+    let successCount = 0;
+    let failCount = 0;
+    const results = [];
+
+    console.log(`[executeBulkCampaign] Starting execution for campaign ${campaignId}, ${contacts.length} contacts`);
+
+    for (const contact of contacts) {
+      const targetJid = formatToJid(contact.phoneNumber);
+      
+      try {
+        // Process message content with spintax
+        const messageContent = processSpintax(campaign.caption || '');
+        
+        // Prepare message object
+        let messageData = {};
+
+        // Handle media attachments
+        if (campaign.mediaAttachments && campaign.mediaAttachments.length > 0) {
+          const mediaFile = campaign.mediaAttachments[0]; // Use first media for now
+          const fs = require('fs');
+          const path = require('path');
+          
+          const mediaPath = path.join(__dirname, '..', mediaFile.filePath);
+          
+          if (fs.existsSync(mediaPath)) {
+            if (mediaFile.fileType.startsWith('image/')) {
+              messageData = {
+                image: { url: mediaPath },
+                caption: messageContent
+              };
+            } else if (mediaFile.fileType.startsWith('video/')) {
+              messageData = {
+                video: { url: mediaPath },
+                caption: messageContent
+              };
+            } else if (mediaFile.fileType.startsWith('audio/')) {
+              messageData = {
+                audio: { url: mediaPath },
+                caption: messageContent
+              };
+            } else {
+              // Document/file
+              messageData = {
+                document: { url: mediaPath },
+                mimetype: mediaFile.fileType,
+                fileName: mediaFile.originalName,
+                caption: messageContent
+              };
+            }
+          } else {
+            console.warn(`Media file not found: ${mediaPath}, sending text only`);
+            messageData = { text: messageContent };
+          }
+        } else {
+          // Text only message
+          messageData = { text: messageContent };
+        }
+
+        // Add link if enabled
+        if (campaign.enableLink && campaign.urlLink) {
+          const textContent = messageData.text || messageData.caption || '';
+          const messageWithLink = `${textContent}\n\n${campaign.urlLink}`;
+          
+          if (messageData.text) {
+            messageData.text = messageWithLink;
+          } else if (messageData.caption) {
+            messageData.caption = messageWithLink;
+          }
+        }
+
+        console.log(`[executeBulkCampaign] Sending to ${contact.name} (${targetJid})`);
+        
+        // Send message via Baileys
+        const sentMessageDetails = await sock.sendMessage(targetJid, messageData);
+        
+        results.push({ 
+          name: contact.name, 
+          number: contact.phoneNumber, 
+          status: 'Success', 
+          messageId: sentMessageDetails?.key?.id 
+        });
+        successCount++;
+
+        // Save to message history
+        try {
+          const newMessage = new Message({
+            user: userId,
+            chatJid: targetJid,
+            body: messageData.text || messageData.caption || '[Media message]',
+            timestamp: new Date(),
+            fromMe: true,
+            messageId: sentMessageDetails?.key?.id || `campaign-${Date.now()}`,
+            status: 'sent',
+            sourceDeviceId: deviceId,
+            campaignId: campaignId
+          });
+          await newMessage.save();
+        } catch (dbError) {
+          console.error(`Failed to save message to DB for ${targetJid}:`, dbError);
+        }
+
+      } catch (error) {
+        console.error(`Failed to send to ${targetJid}:`, error);
+        results.push({ 
+          name: contact.name, 
+          number: contact.phoneNumber, 
+          status: 'Failed', 
+          error: error.message 
+        });
+        failCount++;
+      }
+
+      // Random interval between messages
+      const randomDelay = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
+      await delay(randomDelay * 1000);
+    }
+
+    // Update campaign statistics
+    try {
+      await Campaign.findByIdAndUpdate(campaignId, {
+        $inc: { sentCount: successCount, failedCount: failCount }
+      });
+      console.log(`[executeBulkCampaign] Campaign ${campaignId} stats updated: ${successCount} sent, ${failCount} failed`);
+    } catch (campaignUpdateError) {
+      console.error(`Failed to update campaign stats for ${campaignId}:`, campaignUpdateError);
+    }
+
+    res.json({
+      message: `Bulk campaign execution completed. Success: ${successCount}, Failed: ${failCount}`,
+      results: results,
+      campaign: {
+        id: campaignId,
+        name: campaign.campaignName,
+        totalContacts: contacts.length,
+        successCount,
+        failCount
+      }
+    });
+
+  } catch (error) {
+    console.error("[executeBulkCampaign] Error in campaign execution:", error);
+    res.status(500).json({ message: 'Server error during campaign execution.' });
+  }
+};
+
+// @desc    Execute AI Chatbot campaign - activate/enable the chatbot
+// @route   POST /api/campaigns/:deviceId/:campaignId/execute
+// @access  Private
+const executeAIChatbotCampaign = async (req, res) => {
+  const { campaignId, deviceId } = req.params;
+  const userId = req.user._id.toString();
+
+  try {
+    // Load campaign details
+    const campaign = await Campaign.findOne({
+      _id: campaignId,
+      userId: userId,
+      deviceId: deviceId,
+      campaignType: 'ai_chatbot'
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ message: 'AI Chatbot campaign not found' });
+    }
+
+    // Check if WhatsApp is connected
+    const sock = baileysService.getWhatsAppSocket(userId);
+    if (!sock || !sock.user) {
+      return res.status(400).json({ 
+        message: 'WhatsApp connection is not active. Please connect first.' 
+      });
+    }
+
+    // Enable the campaign
+    await Campaign.findByIdAndUpdate(campaignId, {
+      status: 'enable',
+      statusEnabled: true
+    });
+
+    // Clear AI chatbot processor cache to pick up changes
+    try {
+      const aiChatbotProcessor = require('../services/aiChatbotProcessor.js');
+      aiChatbotProcessor.clearCache(userId);
+    } catch (error) {
+      console.warn(`[executeAIChatbotCampaign] Could not clear AI chatbot cache:`, error.message);
+    }
+
+    console.log(`[executeAIChatbotCampaign] AI Chatbot campaign ${campaignId} activated for user ${userId}`);
+
+    res.json({
+      message: 'AI Chatbot campaign activated successfully',
+      campaign: {
+        id: campaignId,
+        name: campaign.name || campaign.campaignName,
+        status: 'enabled',
+        keywords: campaign.keywords,
+        type: campaign.type
+      }
+    });
+
+  } catch (error) {
+    console.error("[executeAIChatbotCampaign] Error activating AI chatbot campaign:", error);
+    res.status(500).json({ message: 'Server error during AI chatbot campaign activation.' });
+  }
+};
+
+// @desc    Execute campaign (auto-detect type)
+// @route   POST /api/campaigns/:deviceId/:campaignId/execute
+// @access  Private
+const executeCampaign = async (req, res) => {
+  const { campaignId, deviceId } = req.params;
+  const userId = req.user._id.toString();
+
+  try {
+    // Load campaign to determine type
+    const campaign = await Campaign.findOne({
+      _id: campaignId,
+      userId: userId,
+      deviceId: deviceId
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found' });
+    }
+
+    // Route to appropriate execution function based on campaign type
+    if (campaign.campaignType === 'bulk') {
+      return await executeBulkCampaign(req, res);
+    } else if (campaign.campaignType === 'ai_chatbot') {
+      return await executeAIChatbotCampaign(req, res);
+    } else {
+      return res.status(400).json({ message: 'Unknown campaign type' });
+    }
+
+  } catch (error) {
+    console.error("[executeCampaign] Error determining campaign type:", error);
+    res.status(500).json({ message: 'Server error during campaign execution.' });
+  }
+};
+
 module.exports = {
   // Export semua fungsi controller di sini
   // getContacts, // Dipindahkan ke contactController.js
@@ -275,5 +593,8 @@ module.exports = {
   // disconnectWhatsapp, // Nampaknya tidak digunakan/didefinisikan
   sendBulkMessage,
   getChatHistory,
-  getChats // Tambah fungsi baru
+  getChats, // Tambah fungsi baru
+  executeCampaign,
+  executeBulkCampaign,
+  executeAIChatbotCampaign
 }; 
