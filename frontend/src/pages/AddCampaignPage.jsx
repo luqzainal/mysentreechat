@@ -109,9 +109,31 @@ function AddCampaignPage() {
     captionAi: '',
     useAiFeature: 'not_use_ai',
     aiSpintax: '',
+    // Conversation Flow Features
+    conversationMode: 'single_response', // 'single_response' or 'continuous_chat'
+    maxConversationBubbles: '3',
+    endConversationKeywords: '',
+    bubbleOptions: [
+      { id: 1, text: '', active: true },
+      { id: 2, text: '', active: false },
+      { id: 3, text: '', active: false },
+      { id: 4, text: '', active: false },
+      { id: 5, text: '', active: false }
+    ],
+    // API Rest Data Configuration
+    apiRestConfig: {
+      webhookUrl: '',
+      method: 'POST',
+      headers: {},
+      customHeaders: '',
+      sendCustomerData: true,
+      sendResponseData: true,
+      sendTimestamp: true
+    }
   });
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isApiConfigModalOpen, setIsApiConfigModalOpen] = useState(false);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -247,6 +269,42 @@ function AddCampaignPage() {
                 captionAi: campaignData.captionAi || '',
                 useAiFeature: campaignData.useAiFeature || 'not_use_ai',
                 aiSpintax: campaignData.aiSpintax || '',
+                // Conversation Flow Features
+                conversationMode: campaignData.conversationMode || 'single_response',
+                maxConversationBubbles: campaignData.maxConversationBubbles || '3',
+                endConversationKeywords: campaignData.endConversationKeywords || '',
+                bubbleOptions: (() => {
+                  // Start with default 5 bubbles
+                  const defaultBubbles = [
+                    { id: 1, text: '', active: true },
+                    { id: 2, text: '', active: false },
+                    { id: 3, text: '', active: false },
+                    { id: 4, text: '', active: false },
+                    { id: 5, text: '', active: false }
+                  ];
+                  
+                  // If campaign has saved bubbles, merge them with defaults
+                  if (Array.isArray(campaignData.bubbleOptions) && campaignData.bubbleOptions.length > 0) {
+                    campaignData.bubbleOptions.forEach(savedBubble => {
+                      const index = savedBubble.id - 1;
+                      if (index >= 0 && index < 5) {
+                        defaultBubbles[index] = savedBubble;
+                      }
+                    });
+                  }
+                  
+                  return defaultBubbles;
+                })(),
+                // API Rest Data Configuration
+                apiRestConfig: campaignData.apiRestConfig || {
+                  webhookUrl: '',
+                  method: 'POST',
+                  headers: {},
+                  customHeaders: '',
+                  sendCustomerData: true,
+                  sendResponseData: true,
+                  sendTimestamp: true
+                }
               });
               // TODO: Handle media untuk AI Chatbot edit mode jika ada (e.g. panggil API media khusus)
             } else { // Untuk bulk campaign
@@ -386,6 +444,76 @@ function AddCampaignPage() {
   const handleCancelMediaSelection = () => setIsMediaLibraryOpen(false);
   const openMediaLibrary = () => { setTempSelectedMediaInDialog([...selectedMediaItems]); setIsMediaLibraryOpen(true); };
   
+  // Fungsi untuk API Rest Data Configuration
+  const handleOpenApiConfig = () => {
+    setIsApiConfigModalOpen(true);
+  };
+
+  const handleApiConfigChange = (field, value) => {
+    setAiChatbotFormData(prev => ({
+      ...prev,
+      apiRestConfig: {
+        ...prev.apiRestConfig,
+        [field]: value
+      }
+    }));
+  };
+
+  const handleSaveApiConfig = () => {
+    // Process custom headers
+    let processedHeaders = {};
+    if (aiChatbotFormData.apiRestConfig.customHeaders) {
+      try {
+        const headerLines = aiChatbotFormData.apiRestConfig.customHeaders.split('\n');
+        headerLines.forEach(line => {
+          const [key, value] = line.split(':').map(item => item.trim());
+          if (key && value) {
+            processedHeaders[key] = value;
+          }
+        });
+      } catch (error) {
+        console.warn('Error parsing custom headers:', error);
+      }
+    }
+    
+    setAiChatbotFormData(prev => ({
+      ...prev,
+      apiRestConfig: {
+        ...prev.apiRestConfig,
+        headers: processedHeaders
+      }
+    }));
+    
+    setIsApiConfigModalOpen(false);
+    toast.success('API configuration saved!');
+  };
+
+  // Bubble Options Handlers
+  const handleBubbleTextChange = (bubbleId, text) => {
+    setAiChatbotFormData(prev => ({
+      ...prev,
+      bubbleOptions: (prev.bubbleOptions || []).map(bubble =>
+        bubble.id === bubbleId ? { ...bubble, text } : bubble
+      )
+    }));
+  };
+
+  const handleBubbleToggle = (bubbleId) => {
+    setAiChatbotFormData(prev => ({
+      ...prev,
+      bubbleOptions: (prev.bubbleOptions || []).map(bubble =>
+        bubble.id === bubbleId ? { ...bubble, active: !bubble.active } : bubble
+      )
+    }));
+  };
+
+  const getActiveBubbles = () => {
+    if (!aiChatbotFormData.bubbleOptions || !Array.isArray(aiChatbotFormData.bubbleOptions)) {
+      return [];
+    }
+    return aiChatbotFormData.bubbleOptions.filter(bubble => bubble.active && bubble.text.trim());
+  };
+  
   // Fungsi untuk buka Media Library modal
   const handleOpenMediaStorage = () => {
     setTempSelectedMediaInDialog([]);
@@ -434,7 +562,11 @@ function AddCampaignPage() {
             'apiRestDataStatus': 'apiRestDataStatus',
             'captionAi': 'captionAi',
             'useAiFeature': 'useAiFeature',
-            'aiSpintax': 'aiSpintax'
+            'aiSpintax': 'aiSpintax',
+            // Conversation Flow Fields
+            'conversationMode': 'conversationMode',
+            'maxConversationBubbles': 'maxConversationBubbles',
+            'endConversationKeywords': 'endConversationKeywords'
         };
 
         Object.keys(aiChatbotFormData).forEach(key => {
@@ -443,9 +575,18 @@ function AddCampaignPage() {
             } else if (key === 'selectedMediaFromLibrary' && aiChatbotFormData[key]) {
                 // Hantar ID media dari library untuk backend guna
                 dataPayload.append('selectedMediaLibraryId', aiChatbotFormData[key]._id);
+            } else if (key === 'apiRestConfig') {
+                // Handle API Rest configuration
+                dataPayload.append('apiRestConfig', JSON.stringify(aiChatbotFormData[key]));
+            } else if (key === 'bubbleOptions') {
+                // Handle bubble options - only send bubbles with text content
+                const validBubbles = (aiChatbotFormData[key] || []).filter(bubble => 
+                    bubble.text && bubble.text.trim().length > 0
+                );
+                dataPayload.append('bubbleOptions', JSON.stringify(validBubbles));
             } else if (fieldMapping[key]) {
                 dataPayload.append(fieldMapping[key], aiChatbotFormData[key]);
-            } else if (key !== 'mediaFileAi' && key !== 'selectedMediaFromLibrary') {
+            } else if (key !== 'mediaFileAi' && key !== 'selectedMediaFromLibrary' && key !== 'apiRestConfig' && key !== 'bubbleOptions') {
                 dataPayload.append(key, aiChatbotFormData[key]);
             }
         });
@@ -523,6 +664,14 @@ function AddCampaignPage() {
       console.error('Error response:', error.response);
       console.error('Error status:', error.response?.status);
       console.error('Error data:', error.response?.data);
+      
+      // Log detailed error array
+      if (error.response?.data?.error && Array.isArray(error.response.data.error)) {
+        console.error('Validation Errors:');
+        error.response.data.error.forEach((err, index) => {
+          console.error(`  ${index + 1}. ${err}`);
+        });
+      }
       
       // Handle detailed error messages
       let errorMsg = "An unknown error occurred.";
@@ -898,11 +1047,31 @@ function AddCampaignPage() {
 
                 {/* Type */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-type">Type</Label>
-                <RadioGroup id="ai-type" name="type" value={aiChatbotFormData.type} onValueChange={(value) => handleRadioChange(value, 'type')} className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="message_contains_keyword" id="ai-type-contains" /><Label htmlFor="ai-type-contains">Message contains the keyword</Label></div>
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="message_contains_whole_keyword" id="ai-type-whole" /><Label htmlFor="ai-type-whole">Message contains whole keyword</Label></div>
+                <Label htmlFor="ai-type">Trigger Type</Label>
+                <RadioGroup id="ai-type" name="type" value={aiChatbotFormData.type} onValueChange={(value) => handleRadioChange(value, 'type')} className="flex flex-col space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="message_contains_keyword" id="ai-type-contains" />
+                      <Label htmlFor="ai-type-contains">Message contains the keyword</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="message_contains_whole_keyword" id="ai-type-whole" />
+                      <Label htmlFor="ai-type-whole">Message contains whole keyword</Label>
+                    </div>
+                    {aiChatbotFormData.conversationMode === 'continuous_chat' && (
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="message_contains_ai" id="ai-type-ai" />
+                        <Label htmlFor="ai-type-ai" className="text-blue-700 font-medium">
+                          💬 Any message (Continuous Chat Mode)
+                        </Label>
+                      </div>
+                    )}
                 </RadioGroup>
+                {aiChatbotFormData.type === 'message_contains_ai' && (
+                  <div className="mt-2 p-3 border rounded-md bg-blue-50 text-xs text-blue-800">
+                    <p className="font-semibold mb-1">ℹ️ Continuous Chat Mode:</p>
+                    <p>Bot will respond to ALL messages from customers. Use keywords field to set initial conversation starters (optional), and set end keywords below to stop conversations.</p>
+                  </div>
+                )}
                 </div>
 
                 {/* Name */}
@@ -919,9 +1088,26 @@ function AddCampaignPage() {
 
                 {/* Keywords */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-keywords">Keywords</Label>
-                <Textarea id="ai-keywords" name="keywords" value={aiChatbotFormData.keywords} onChange={handleInputChange} placeholder="Enter keywords, separated by comma. e.g., hai,helo,info produk" />
-                <p className="text-xs text-muted-foreground">Bot will trigger if message contains any of these keywords.</p>
+                <Label htmlFor="ai-keywords">
+                  Keywords {aiChatbotFormData.type === 'message_contains_ai' ? '(Optional - For Initial Trigger)' : '(Required)'}
+                </Label>
+                <Textarea 
+                  id="ai-keywords" 
+                  name="keywords" 
+                  value={aiChatbotFormData.keywords} 
+                  onChange={handleInputChange} 
+                  placeholder={
+                    aiChatbotFormData.type === 'message_contains_ai' 
+                      ? "Optional: Enter keywords to start conversation. e.g., hai,help,info (leave empty to respond to ANY first message)"
+                      : "Enter keywords, separated by comma. e.g., hai,helo,info produk"
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  {aiChatbotFormData.type === 'message_contains_ai' 
+                    ? 'In continuous chat mode: Keywords are optional. If set, conversation starts when customer sends these words. If empty, bot responds to any first message.'
+                    : 'Bot will trigger if message contains any of these keywords.'
+                  }
+                </p>
                 </div>
 
                 {/* Next Bot Action */}
@@ -964,7 +1150,13 @@ function AddCampaignPage() {
                     <div className="flex items-center space-x-2"><RadioGroupItem value="disabled" id="ai-apiRestDataStatus-disabled" /><Label htmlFor="ai-apiRestDataStatus-disabled">Disabled</Label></div>
                     <div className="flex items-center space-x-2"><RadioGroupItem value="enabled" id="ai-apiRestDataStatus-enabled" /><Label htmlFor="ai-apiRestDataStatus-enabled">Enabled</Label></div>
                     </RadioGroup>
-                    <Button type="button" variant="outline" size="sm" disabled={aiChatbotFormData.apiRestDataStatus === 'disabled'}>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm" 
+                      disabled={aiChatbotFormData.apiRestDataStatus === 'disabled'}
+                      onClick={handleOpenApiConfig}
+                    >
                     <Settings2Icon className="mr-2 h-4 w-4" /> Configure API
                     </Button>
                 </div>
@@ -998,10 +1190,10 @@ function AddCampaignPage() {
                 )}
                 </div>
 
-                {/* Caption AI */}
+                {/* Caption AI dengan Spintax */}
                 <div className="space-y-2">
                 <Label htmlFor="ai-captionAi">Caption / Text Message <span className="text-red-500">*</span></Label>
-                <Textarea id="ai-captionAi" name="captionAi" value={aiChatbotFormData.captionAi} onChange={handleInputChange} placeholder="Write a caption or text message for the bot response" rows={4} required />
+                <Textarea id="ai-captionAi" name="captionAi" value={aiChatbotFormData.captionAi} onChange={handleInputChange} placeholder="Write message with Spintax support: {Hi|Hello|Hola}... Use [greet] [wa_name] [me_wa_name] [now_formatted|DD MMM YYYY]" rows={4} required />
                 <div className="flex space-x-1 mt-1">
                     {/* Butang toolbar ini adalah placeholder visual. Implementasi sebenar memerlukan editor teks kaya atau logik JS. */}
                     <Button type="button" variant="outline" size="icon" title="Bold (Not implemented)"><TypeIcon className="h-4 w-4" /></Button> 
@@ -1010,30 +1202,237 @@ function AddCampaignPage() {
                     <Button type="button" variant="outline" size="icon" title="Settings (Not implemented)"><Settings2Icon className="h-4 w-4" /></Button>
                     <Button type="button" variant="outline" size="icon" title="URL Shortener (Not implemented)"><Link2Icon className="h-4 w-4" /></Button>
                 </div>
+                <div className="mt-1 p-2 border rounded-md bg-muted text-xs text-muted-foreground">
+                    <p className="font-semibold mb-1">Available Parameters:</p>
+                    <ul className="list-disc list-inside pl-4">
+                    <li><code>[greet]</code>: Returns greeting based on time (e.g., good morning).</li>
+                    <li><code>[wa_name]</code>: Returns user's WhatsApp name.</li>
+                    <li><code>[me_wa_name]</code>: Returns your WhatsApp name.</li>
+                    <li><code>[now_formatted|FORMAT]</code>: Returns current time. E.g., <code>[now_formatted|DD MMM YYYY, HH:mm]</code>.</li>
+                    </ul>
+                </div>
                 </div>
 
                 {/* Use AI Feature */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-useAiFeature">Use AI for Spintax/Dynamic Content</Label>
+                <Label htmlFor="ai-useAiFeature">Use AI for Dynamic Response</Label>
                 <RadioGroup id="ai-useAiFeature" name="useAiFeature" value={aiChatbotFormData.useAiFeature} onValueChange={(value) => handleRadioChange(value, 'useAiFeature')} className="flex space-x-4">
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="not_use_ai" id="ai-useAiFeature-no" /><Label htmlFor="ai-useAiFeature-no">Not use AI</Label></div>
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="use_ai" id="ai-useAiFeature-yes" /><Label htmlFor="ai-useAiFeature-yes">Use AI</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="not_use_ai" id="ai-useAiFeature-no" /><Label htmlFor="ai-useAiFeature-no">Static Response</Label></div>
+                    <div className="flex items-center space-x-2 bg-gradient-to-r from-blue-50 to-purple-50 p-2 rounded-md border"><RadioGroupItem value="use_ai" id="ai-useAiFeature-yes" /><Label htmlFor="ai-useAiFeature-yes" className="font-medium text-blue-700">🤖 AI-Powered Response</Label></div>
                 </RadioGroup>
+                <div className="mt-1 p-2 border rounded-md bg-amber-50 text-xs text-amber-800">
+                    <p className="font-semibold mb-1">ℹ️ Feature Comparison:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <p className="font-medium">Static Response:</p>
+                            <p>Uses fixed caption with Spintax</p>
+                        </div>
+                        <div>
+                            <p className="font-medium">AI-Powered:</p>
+                            <p>Generates dynamic responses based on context</p>
+                        </div>
+                    </div>
+                </div>
                 {aiChatbotFormData.useAiFeature === 'use_ai' && (
                     <div className="mt-2">
-                    <Textarea name="aiSpintax" value={aiChatbotFormData.aiSpintax} onChange={handleInputChange} placeholder="Random message by Spintax ex: {Hi|Hello|Hola}... Parameters are available.
-[greet] [wa_name] [me_wa_name] [now_formatted|DD MMM YYYY]" rows={6} />
-                    <div className="mt-1 p-2 border rounded-md bg-muted text-xs text-muted-foreground">
-                        <p className="font-semibold mb-1">Available Parameters:</p>
+                    <Label htmlFor="ai-prompt">AI Prompt for Dynamic Response <span className="text-red-500">*</span></Label>
+                    <Textarea 
+                      id="ai-prompt" 
+                      name="aiSpintax" 
+                      value={aiChatbotFormData.aiSpintax} 
+                      onChange={handleInputChange} 
+                      placeholder="Enter AI prompt to generate dynamic responses. Example: Generate a friendly response about our product pricing in Malay. Keep it professional and helpful. Use the customer's message context to provide relevant answers." 
+                      rows={6}
+                      required={aiChatbotFormData.useAiFeature === 'use_ai'}
+                    />
+                    <div className="mt-1 p-2 border rounded-md bg-blue-50 text-xs text-blue-800">
+                        <p className="font-semibold mb-1">AI Prompt Guidelines:</p>
                         <ul className="list-disc list-inside pl-4">
-                        <li><code>[greet]</code>: Returns greeting based on time (e.g., good morning).</li>
-                        <li><code>[wa_name]</code>: Returns user's WhatsApp name.</li>
-                        <li><code>[me_wa_name]</code>: Returns your WhatsApp name.</li>
-                        <li><code>[now_formatted|FORMAT]</code>: Returns current time. E.g., <code>[now_formatted|DD MMM YYYY, HH:mm]</code>.</li>
+                        <li>Be specific about tone, language, and response style</li>
+                        <li>Include context about your business/product if relevant</li>
+                        <li>The AI will have access to the customer's incoming message</li>
+                        <li>You can use parameters like [wa_name], [greet], [now_formatted|DD MMM YYYY]</li>
+                        <li>Example: "Generate a helpful response in Malay about our delivery services. Be friendly and include the customer's name if mentioned. If they ask about price, mention we offer competitive rates."</li>
                         </ul>
+                    </div>
+                    <div className="mt-1 p-2 border rounded-md bg-green-50 text-xs text-green-800">
+                        <p className="font-semibold mb-1">✅ How It Works:</p>
+                        <p>When a customer sends a message matching your keywords, the AI will:</p>
+                        <ol className="list-decimal list-inside pl-4 mt-1">
+                        <li>Read the customer's message</li>
+                        <li>Use your prompt as instructions</li>
+                        <li>Generate a personalized response</li>
+                        <li>Send the response automatically</li>
+                        </ol>
                     </div>
                     </div>
                 )}
+
+                {/* Conversation Flow & Bubble Options */}
+                <Card className="bg-blue-50 border-blue-200">
+                  <CardHeader className="pb-4">
+                    <CardTitle className="text-lg text-blue-800">💬 Conversation Flow Settings</CardTitle>
+                    <CardDescription className="text-blue-700">
+                      Configure how AI handles ongoing conversations and response options.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    
+                    {/* Conversation Mode */}
+                    <div className="space-y-3">
+                      <Label htmlFor="conversation-mode">Conversation Mode</Label>
+                      
+                      <RadioGroup 
+                        value={aiChatbotFormData.conversationMode} 
+                        onValueChange={(value) => handleRadioChange(value, 'conversationMode')} 
+                        className="space-y-3"
+                      >
+                        {/* Single Response Option */}
+                        <div className={`flex items-start space-x-3 p-3 border rounded-md ${aiChatbotFormData.conversationMode === 'single_response' ? 'border-blue-300 bg-blue-50' : 'bg-white'}`}>
+                          <RadioGroupItem 
+                            value="single_response" 
+                            id="mode-single"
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <Label htmlFor="mode-single" className="font-medium text-base cursor-pointer">
+                              📝 Single Response Mode
+                            </Label>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              AI responds only when customer sends a message with trigger keywords. Perfect for FAQ bots.
+                            </p>
+                            <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
+                              <strong>Example flow:</strong><br/>
+                              Customer: "harga" → AI responds<br/>
+                              Customer: "ok terima kasih" → No response (no keyword)<br/>
+                              Customer: "delivery" → AI responds
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Continuous Chat Option */}
+                        <div className={`flex items-start space-x-3 p-3 border rounded-md ${aiChatbotFormData.conversationMode === 'continuous_chat' ? 'border-blue-300 bg-blue-50' : 'bg-white'}`}>
+                          <RadioGroupItem 
+                            value="continuous_chat" 
+                            id="mode-continuous"
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <Label htmlFor="mode-continuous" className="font-medium text-base cursor-pointer">
+                              💬 Continuous Chat Mode
+                            </Label>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              After initial keyword trigger, AI responds to ALL customer messages until conversation ends.
+                            </p>
+                            <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
+                              <strong>Example flow:</strong><br/>
+                              Customer: "harga" → AI responds (conversation starts)<br/>
+                              Customer: "ok terima kasih" → AI responds<br/>
+                              Customer: "bye" → AI ends conversation (end keyword)
+                            </div>
+                          </div>
+                        </div>
+                      </RadioGroup>
+                    </div>
+
+                    {/* Max Conversation Bubbles */}
+                    {aiChatbotFormData.conversationMode === 'continuous_chat' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="max-bubbles">Maximum Conversation Bubbles</Label>
+                        <Select 
+                          value={aiChatbotFormData.maxConversationBubbles} 
+                          onValueChange={(value) => handleRadioChange(value, 'maxConversationBubbles')}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select max bubbles" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="3">3 bubbles</SelectItem>
+                            <SelectItem value="4">4 bubbles</SelectItem>
+                            <SelectItem value="5">5 bubbles</SelectItem>
+                            <SelectItem value="6">6 bubbles</SelectItem>
+                            <SelectItem value="7">7 bubbles</SelectItem>
+                            <SelectItem value="unlimited">Unlimited</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Limit how many times AI can respond in one conversation.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* End Conversation Keywords */}
+                    {aiChatbotFormData.conversationMode === 'continuous_chat' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="end-keywords">End Conversation Keywords</Label>
+                        <Textarea 
+                          id="end-keywords"
+                          name="endConversationKeywords"
+                          value={aiChatbotFormData.endConversationKeywords}
+                          onChange={handleInputChange}
+                          placeholder="stop, end, bye, selesai, tamat, finish"
+                          rows={2}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          When customer sends any of these keywords, AI will end the conversation. Separate with commas.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Multiple Bubble Text Options */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Response Bubble Options</Label>
+                        <Badge variant="secondary">
+                          {getActiveBubbles().length}/5 active
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Create multiple response options. AI will randomly select from active bubbles for variety.
+                      </p>
+                      
+                      <div className="space-y-3">
+                        {(aiChatbotFormData.bubbleOptions || []).map((bubble, index) => (
+                          <div key={bubble.id} className="flex items-start space-x-3 p-3 border rounded-md bg-white">
+                            <Checkbox
+                              checked={bubble.active}
+                              onCheckedChange={() => handleBubbleToggle(bubble.id)}
+                              className="mt-1"
+                            />
+                            <div className="flex-1 space-y-2">
+                              <Label className="text-sm font-medium">
+                                Bubble {index + 1} {bubble.active && bubble.text && '✓'}
+                              </Label>
+                              <Textarea
+                                placeholder={`Enter response text for bubble ${index + 1}...`}
+                                value={bubble.text}
+                                onChange={(e) => handleBubbleTextChange(bubble.id, e.target.value)}
+                                rows={2}
+                                disabled={!bubble.active}
+                                className={!bubble.active ? 'bg-gray-50' : ''}
+                              />
+                              {bubble.active && bubble.text && (
+                                <p className="text-xs text-green-600">
+                                  ✓ This bubble is active and will be used
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {getActiveBubbles().length === 0 && (
+                        <div className="p-3 border border-orange-200 rounded-md bg-orange-50">
+                          <p className="text-sm text-orange-800">
+                            ⚠️ At least one bubble should be active and have text content.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                  </CardContent>
+                </Card>
+
                 </div>
             </CardContent>
             </Card>
@@ -1045,7 +1444,17 @@ function AddCampaignPage() {
             Back
           </Button>
           {((determinedCampaignType === 'bulk' && selectedDeviceId) || (determinedCampaignType === 'ai_chatbot' && selectedDeviceId)) && (
-            <Button type="submit" disabled={isSaving || isLoadingPageData || (determinedCampaignType === 'ai_chatbot' && !aiChatbotFormData.name) || (determinedCampaignType === 'bulk' && !formData.campaignName) }>
+            <Button 
+              type="submit" 
+              disabled={
+                isSaving || 
+                isLoadingPageData || 
+                (determinedCampaignType === 'ai_chatbot' && !aiChatbotFormData.name) || 
+                (determinedCampaignType === 'ai_chatbot' && aiChatbotFormData.useAiFeature === 'use_ai' && !aiChatbotFormData.aiSpintax) ||
+                (determinedCampaignType === 'ai_chatbot' && getActiveBubbles().length === 0) ||
+                (determinedCampaignType === 'bulk' && !formData.campaignName)
+              }
+            >
               {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isEditMode ? 'Update Campaign' : 'Create Campaign'}
             </Button>
@@ -1098,6 +1507,135 @@ function AddCampaignPage() {
                 <Button onClick={handleConfirmMediaSelection}>Confirm ({tempSelectedMediaInDialog.length} selected)</Button>
             </DialogFooter>
             </DialogContent>
+        </Dialog>
+
+        {/* API Rest Data Configuration Modal */}
+        <Dialog open={isApiConfigModalOpen} onOpenChange={setIsApiConfigModalOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>🔗 API Rest Data Configuration</DialogTitle>
+              <DialogDescription>
+                Configure external API/webhook to receive customer interaction data from AI chatbot responses.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6 max-h-[60vh] overflow-y-auto p-1">
+              {/* Webhook URL */}
+              <div className="space-y-2">
+                <Label htmlFor="webhook-url">Webhook URL <span className="text-red-500">*</span></Label>
+                <Input 
+                  id="webhook-url"
+                  type="url"
+                  placeholder="https://your-api.com/webhook/whatsapp"
+                  value={aiChatbotFormData.apiRestConfig.webhookUrl}
+                  onChange={(e) => handleApiConfigChange('webhookUrl', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  URL where customer interaction data will be sent
+                </p>
+              </div>
+
+              {/* HTTP Method */}
+              <div className="space-y-2">
+                <Label htmlFor="http-method">HTTP Method</Label>
+                <Select 
+                  value={aiChatbotFormData.apiRestConfig.method} 
+                  onValueChange={(value) => handleApiConfigChange('method', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select HTTP method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="POST">POST</SelectItem>
+                    <SelectItem value="PUT">PUT</SelectItem>
+                    <SelectItem value="PATCH">PATCH</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Custom Headers */}
+              <div className="space-y-2">
+                <Label htmlFor="custom-headers">Custom Headers (Optional)</Label>
+                <Textarea 
+                  id="custom-headers"
+                  placeholder="Authorization: Bearer your-token&#10;Content-Type: application/json&#10;X-API-Key: your-api-key"
+                  value={aiChatbotFormData.apiRestConfig.customHeaders}
+                  onChange={(e) => handleApiConfigChange('customHeaders', e.target.value)}
+                  rows={4}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter headers in "Key: Value" format, one per line
+                </p>
+              </div>
+
+              {/* Data to Send */}
+              <div className="space-y-3">
+                <Label>Data to Send</Label>
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="send-customer-data"
+                      checked={aiChatbotFormData.apiRestConfig.sendCustomerData}
+                      onCheckedChange={(checked) => handleApiConfigChange('sendCustomerData', checked)}
+                    />
+                    <Label htmlFor="send-customer-data" className="text-sm">Customer Data (phone, name, message)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="send-response-data"
+                      checked={aiChatbotFormData.apiRestConfig.sendResponseData}
+                      onCheckedChange={(checked) => handleApiConfigChange('sendResponseData', checked)}
+                    />
+                    <Label htmlFor="send-response-data" className="text-sm">Bot Response Data (AI/static response)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="send-timestamp"
+                      checked={aiChatbotFormData.apiRestConfig.sendTimestamp}
+                      onCheckedChange={(checked) => handleApiConfigChange('sendTimestamp', checked)}
+                    />
+                    <Label htmlFor="send-timestamp" className="text-sm">Timestamp & Campaign Info</Label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Example Payload */}
+              <div className="space-y-2">
+                <Label>Example Payload</Label>
+                <div className="p-3 bg-muted rounded-md text-xs font-mono">
+                  <pre>{`{
+  "event": "ai_chatbot_response",
+  "campaign_id": "campaign_id_here",
+  "campaign_name": "Campaign Name",
+  "customer": {
+    "phone": "+60123456789",
+    "name": "Customer Name",
+    "message": "Customer's original message"
+  },
+  "bot_response": {
+    "message": "AI generated response",
+    "type": "ai_generated|static",
+    "ai_tokens": 45
+  },
+  "timestamp": "2025-08-17T14:30:00Z",
+  "device_id": "device_id_here"
+}`}</pre>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="mt-6">
+              <Button variant="outline" onClick={() => setIsApiConfigModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSaveApiConfig}
+                disabled={!aiChatbotFormData.apiRestConfig.webhookUrl}
+              >
+                Save Configuration
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
     </div>
   );

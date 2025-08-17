@@ -14,7 +14,8 @@
       "Bash(find:*)",
       "Bash(chmod:*)",
       "Bash(cp:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(npx eslint:*)"
     ],
     "deny": []
   }

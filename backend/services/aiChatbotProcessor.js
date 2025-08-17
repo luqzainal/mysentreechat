@@ -1,6 +1,8 @@
 const Campaign = require('../models/Campaign.js');
 const Message = require('../models/Message.js');
 const { processSpintax } = require('../utils/spintaxUtils.js');
+const webhookService = require('./webhookService.js');
+const conversationService = require('./conversationService.js');
 
 class AIChatbotProcessor {
     constructor() {
@@ -70,14 +72,49 @@ class AIChatbotProcessor {
                 return false;
             }
 
-            // Check each campaign for matches
+            // Check for ongoing conversations first
+            let conversationCampaign = null;
+            const conversationStatus = conversationService.getConversationStatus(userId, remoteJid);
+            
+            if (conversationStatus) {
+                // Find the campaign for ongoing conversation
+                conversationCampaign = activeCampaigns.find(c => c._id.toString() === conversationStatus.campaignId);
+                
+                if (conversationCampaign && conversationService.shouldContinueConversation(userId, remoteJid, conversationCampaign, messageText)) {
+                    console.log(`[AIChatbotProcessor] Continuing conversation with campaign ${conversationCampaign._id}`);
+                    console.log(`[AIChatbotProcessor] Campaign conversation settings:`);
+                    console.log(`  conversationMode: ${conversationCampaign.conversationMode}`);
+                    console.log(`  maxConversationBubbles: ${conversationCampaign.maxConversationBubbles}`);
+                    console.log(`  endConversationKeywords: "${conversationCampaign.endConversationKeywords}"`);
+                    console.log(`  bubbleOptions count: ${conversationCampaign.bubbleOptions?.length || 0}`);
+                    
+                    // Increment message count
+                    conversationService.incrementMessageCount(userId, remoteJid);
+                    
+                    await this.sendChatbotResponse(userId, deviceId, conversationCampaign, remoteJid, messageText, true);
+                    
+                    // Update campaign statistics
+                    await Campaign.findByIdAndUpdate(conversationCampaign._id, {
+                        $inc: { 'aiStats.totalInteractions': 1 }
+                    });
+
+                    return true;
+                }
+            }
+
+            // Check each campaign for new matches
             for (const campaign of activeCampaigns) {
                 const shouldRespond = this.checkMessageMatch(campaign, messageText, remoteJid);
                 
                 if (shouldRespond) {
                     console.log(`[AIChatbotProcessor] Campaign ${campaign._id} (${campaign.name}) matched message. Sending response...`);
                     
-                    await this.sendChatbotResponse(userId, deviceId, campaign, remoteJid, messageText);
+                    // Start conversation if in continuous mode
+                    if (campaign.conversationMode === 'continuous_chat') {
+                        conversationService.startConversation(userId, remoteJid, campaign._id.toString());
+                    }
+                    
+                    await this.sendChatbotResponse(userId, deviceId, campaign, remoteJid, messageText, false);
                     
                     // Update campaign statistics
                     await Campaign.findByIdAndUpdate(campaign._id, {
@@ -163,7 +200,7 @@ class AIChatbotProcessor {
     }
 
     // Send chatbot response
-    async sendChatbotResponse(userId, deviceId, campaign, remoteJid, originalMessage) {
+    async sendChatbotResponse(userId, deviceId, campaign, remoteJid, originalMessage, isContinuation = false) {
         try {
             const baileysService = require('./baileysService.js');
             const sock = baileysService.getWhatsAppSocket(userId);
@@ -181,12 +218,63 @@ class AIChatbotProcessor {
                 console.warn(`[AIChatbotProcessor] Failed to set presence, continuing anyway:`, presenceError.message);
             }
 
-            // Process response message with spintax
-            let responseText = processSpintax(campaign.captionAi || campaign.caption || 'Hello! How can I help you?');
-
-            // Add AI processing if enabled
+            // Process response message
+            let responseText;
+            
+            // Check if AI feature is enabled
             if (campaign.useAiFeature === 'use_ai' && campaign.aiSpintax) {
-                responseText = processSpintax(campaign.aiSpintax);
+                // Use AI to generate dynamic response
+                console.log(`[AIChatbotProcessor] Using AI to generate response for campaign ${campaign._id}`);
+                
+                const aiService = require('./aiService');
+                
+                // Process AI prompt with parameters
+                const processedPrompt = aiService.processAIPrompt(campaign.aiSpintax, {
+                    incomingMessage: originalMessage,
+                    senderName: remoteJid.split('@')[0], // Use phone number as fallback
+                    botName: 'Assistant'
+                });
+                
+                // Generate AI response
+                const aiResult = await aiService.generateResponse(userId, processedPrompt, {
+                    incomingMessage: originalMessage,
+                    model: campaign.aiModel || 'gpt-3.5-turbo',
+                    maxTokens: campaign.aiMaxTokens || 150,
+                    temperature: campaign.aiTemperature || 0.7
+                });
+                
+                if (aiResult && aiResult.response) {
+                    responseText = aiResult.response;
+                    
+                    // Log AI usage for campaign stats
+                    try {
+                        await Campaign.findByIdAndUpdate(campaign._id, {
+                            $inc: { 
+                                'aiStats.totalTokens': aiResult.usage.tokens,
+                                'aiStats.totalInteractions': 1
+                            },
+                            $push: {
+                                'aiLogs': {
+                                    input: processedPrompt,
+                                    output: aiResult.response,
+                                    tokens: aiResult.usage.tokens,
+                                    duration: aiResult.usage.responseTime,
+                                    timestamp: new Date()
+                                }
+                            }
+                        });
+                        console.log(`[AIChatbotProcessor] AI stats updated for campaign ${campaign._id}`);
+                    } catch (statsError) {
+                        console.warn(`[AIChatbotProcessor] Failed to update AI stats:`, statsError.message);
+                    }
+                } else {
+                    console.warn(`[AIChatbotProcessor] AI generation failed, falling back to caption for campaign ${campaign._id}`);
+                    responseText = processSpintax(campaign.captionAi || campaign.caption || 'Hello! How can I help you?');
+                }
+            } else {
+                // Use static caption with bubble selection and spintax processing
+                const selectedBubbleText = conversationService.selectRandomBubble(campaign);
+                responseText = processSpintax(selectedBubbleText);
             }
 
             // Simulate typing if enabled
@@ -218,6 +306,43 @@ class AIChatbotProcessor {
             }
 
             console.log(`[AIChatbotProcessor] Sent chatbot response to ${remoteJid} from campaign ${campaign._id}`);
+            
+            // Send webhook if API Rest Data is enabled
+            try {
+                const customerData = {
+                    phone: remoteJid,
+                    name: remoteJid.split('@')[0], // Use phone number as fallback name
+                    message: originalMessage
+                };
+                
+                const botResponseData = {
+                    message: responseText,
+                    type: campaign.useAiFeature === 'use_ai' && campaign.aiSpintax ? 'ai_generated' : 'static',
+                    aiTokens: aiResult?.usage?.tokens || 0,
+                    responseTime: aiResult?.usage?.responseTime || 0
+                };
+                
+                const webhookResult = await webhookService.sendWebhook(
+                    campaign, 
+                    customerData, 
+                    botResponseData,
+                    {
+                        messageId: sentMessage?.key?.id,
+                        deviceId: deviceId
+                    }
+                );
+                
+                if (webhookResult.success && !webhookResult.skipped) {
+                    console.log(`[AIChatbotProcessor] Webhook sent successfully for campaign ${campaign._id}`);
+                } else if (webhookResult.skipped) {
+                    console.log(`[AIChatbotProcessor] Webhook skipped for campaign ${campaign._id} (not configured)`);
+                } else {
+                    console.warn(`[AIChatbotProcessor] Webhook failed for campaign ${campaign._id}:`, webhookResult.error);
+                }
+            } catch (webhookError) {
+                console.error(`[AIChatbotProcessor] Webhook error for campaign ${campaign._id}:`, webhookError.message);
+            }
+            
             return true;
 
         } catch (error) {

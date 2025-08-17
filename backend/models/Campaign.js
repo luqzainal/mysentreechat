@@ -138,6 +138,14 @@ const campaignSchema = new mongoose.Schema({
     enum: ['enabled', 'disabled'],
     default: 'disabled'
   },
+  apiRestConfig: {
+    webhookUrl: { type: String },
+    method: { type: String, enum: ['POST', 'PUT', 'PATCH'], default: 'POST' },
+    headers: { type: mongoose.Schema.Types.Mixed },
+    sendCustomerData: { type: Boolean, default: true },
+    sendResponseData: { type: Boolean, default: true },
+    sendTimestamp: { type: Boolean, default: true }
+  },
   useAiFeature: {
     type: String,
     enum: ['not_use_ai', 'use_ai'],
@@ -146,6 +154,24 @@ const campaignSchema = new mongoose.Schema({
   aiSpintax: {
     type: String
   },
+  // Conversation Flow Features
+  conversationMode: {
+    type: String,
+    enum: ['single_response', 'continuous_chat'],
+    default: 'single_response'
+  },
+  maxConversationBubbles: {
+    type: String,
+    default: '3'
+  },
+  endConversationKeywords: {
+    type: String
+  },
+  bubbleOptions: [{
+    id: { type: Number, required: true },
+    text: { type: String, required: true },
+    active: { type: Boolean, default: false }
+  }],
   // BARU: Untuk kempen pukal, simpan ID kumpulan kenalan yang digunakan
   contactGroupId: {
     type: mongoose.Schema.Types.ObjectId,

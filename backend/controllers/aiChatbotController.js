@@ -126,7 +126,12 @@ const getAiCampaigns = asyncHandler(async (req, res) => {
         sendTo: c.sendTo,
         presenceDelayStatus: c.presenceDelayStatus,
         saveData: c.saveData,
-        apiRestDataStatus: c.apiRestDataStatus
+        apiRestDataStatus: c.apiRestDataStatus,
+        // Conversation Flow Features
+        conversationMode: c.conversationMode,
+        maxConversationBubbles: c.maxConversationBubbles,
+        endConversationKeywords: c.endConversationKeywords,
+        bubbleOptions: c.bubbleOptions
     }));
 
     res.json(formattedCampaigns);
@@ -201,6 +206,13 @@ const getAiCampaign = asyncHandler(async (req, res) => {
         captionAi: campaign.captionAi,
         useAiFeature: campaign.useAiFeature,
         aiSpintax: campaign.aiSpintax,
+        // Conversation Flow Features
+        conversationMode: campaign.conversationMode,
+        maxConversationBubbles: campaign.maxConversationBubbles,
+        endConversationKeywords: campaign.endConversationKeywords,
+        bubbleOptions: campaign.bubbleOptions,
+        // API Rest Config
+        apiRestConfig: campaign.apiRestConfig,
         mediaAttachments: campaign.mediaAttachments,
         createdAt: campaign.createdAt,
         updatedAt: campaign.updatedAt
@@ -224,6 +236,31 @@ const createAiCampaign = asyncHandler(async (req, res) => {
     // Process keywords if provided as string
     if (req.body.keywords && typeof req.body.keywords === 'string') {
         req.body.keywords = req.body.keywords.split(',').map(k => k.trim()).filter(k => k);
+    }
+
+    // Process API Rest Config if provided
+    if (req.body.apiRestConfig && typeof req.body.apiRestConfig === 'string') {
+        try {
+            req.body.apiRestConfig = JSON.parse(req.body.apiRestConfig);
+        } catch (error) {
+            console.error('Error parsing apiRestConfig:', error);
+            req.body.apiRestConfig = null;
+        }
+    }
+
+    // Process Bubble Options if provided
+    if (req.body.bubbleOptions && typeof req.body.bubbleOptions === 'string') {
+        try {
+            req.body.bubbleOptions = JSON.parse(req.body.bubbleOptions);
+        } catch (error) {
+            console.error('Error parsing bubbleOptions:', error);
+            req.body.bubbleOptions = [];
+        }
+    }
+
+    // Process End Conversation Keywords if provided as string
+    if (req.body.endConversationKeywords && typeof req.body.endConversationKeywords === 'string') {
+        req.body.endConversationKeywords = req.body.endConversationKeywords.split(',').map(k => k.trim()).filter(k => k).join(',');
     }
 
     // Handle media file if uploaded
@@ -292,6 +329,31 @@ const updateAiCampaign = asyncHandler(async (req, res) => {
     // Process keywords if provided as string
     if (req.body.keywords && typeof req.body.keywords === 'string') {
         req.body.keywords = req.body.keywords.split(',').map(k => k.trim()).filter(k => k);
+    }
+
+    // Process API Rest Config if provided
+    if (req.body.apiRestConfig && typeof req.body.apiRestConfig === 'string') {
+        try {
+            req.body.apiRestConfig = JSON.parse(req.body.apiRestConfig);
+        } catch (error) {
+            console.error('Error parsing apiRestConfig:', error);
+            req.body.apiRestConfig = null;
+        }
+    }
+
+    // Process Bubble Options if provided
+    if (req.body.bubbleOptions && typeof req.body.bubbleOptions === 'string') {
+        try {
+            req.body.bubbleOptions = JSON.parse(req.body.bubbleOptions);
+        } catch (error) {
+            console.error('Error parsing bubbleOptions:', error);
+            req.body.bubbleOptions = [];
+        }
+    }
+
+    // Process End Conversation Keywords if provided as string
+    if (req.body.endConversationKeywords && typeof req.body.endConversationKeywords === 'string') {
+        req.body.endConversationKeywords = req.body.endConversationKeywords.split(',').map(k => k.trim()).filter(k => k).join(',');
     }
 
     // Handle media file if uploaded
