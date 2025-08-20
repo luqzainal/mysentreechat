@@ -1028,4 +1028,56 @@ router.get('/debug/ai-chatbot/:userId', async (req, res) => {
     }
 });
 
+// Debug endpoint untuk check user contacts dan campaign readiness
+router.get('/debug/user-contacts', protect, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        // Get all user contacts
+        const Contact = require('../models/Contact');
+        const ContactGroup = require('../models/ContactGroup');
+        
+        const userContacts = await Contact.find({ user: userId });
+        const userContactGroups = await ContactGroup.find({ user: userId }).populate('contacts');
+        
+        const contactsData = userContacts.map(contact => ({
+            id: contact._id,
+            name: contact.name,
+            phoneNumber: contact.phoneNumber,
+            createdAt: contact.createdAt
+        }));
+        
+        const groupsData = userContactGroups.map(group => ({
+            id: group._id,
+            name: group.groupName,
+            contactCount: group.contacts?.length || 0,
+            contacts: group.contacts?.map(c => ({ name: c.name, phone: c.phoneNumber })) || []
+        }));
+        
+        res.json({
+            success: true,
+            userId: userId,
+            summary: {
+                totalContacts: userContacts.length,
+                totalGroups: userContactGroups.length,
+                canUseAllContacts: userContacts.length > 0
+            },
+            contacts: contactsData,
+            contactGroups: groupsData,
+            recommendations: {
+                useAllContacts: userContacts.length > 0 ? 'Available - you can use "Send to all contacts" option' : 'Not available - please add contacts first',
+                addContacts: userContacts.length === 0 ? 'Go to Upload Contacts page to add contacts' : null
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error in debug user contacts:', error);
+        res.status(500).json({ 
+            success: false,
+            message: 'Server error',
+            error: error.message 
+        });
+    }
+});
+
 module.exports = router; 

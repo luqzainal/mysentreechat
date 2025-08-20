@@ -304,18 +304,31 @@ const executeBulkCampaign = async (req, res) => {
     let contactsToSend = [];
     
     if (campaign.contactGroupId === 'all_contacts') {
-      console.log(`[executeBulkCampaign] Using all contacts mode`);
+      console.log(`[executeBulkCampaign] Using all contacts mode for user: ${userId}`);
       
       // Get all user contacts directly
       const allUserContacts = await Contact.find({ user: userId });
+      console.log(`[executeBulkCampaign] Raw contact query result:`, allUserContacts);
+      
       if (allUserContacts.length === 0) {
+        // Check if any contacts exist at all for debugging
+        const totalContactsInDb = await Contact.countDocuments();
+        console.log(`[executeBulkCampaign] No contacts found for user ${userId}. Total contacts in DB: ${totalContactsInDb}`);
+        
         return res.status(400).json({ 
-          message: 'No contacts found. Please add contacts first.' 
+          success: false,
+          message: 'No contacts found in your account. Please add contacts first by going to Upload Contacts page.',
+          debug: {
+            userId: userId,
+            totalContactsInSystem: totalContactsInDb,
+            searchCriteria: { user: userId }
+          }
         });
       }
       
       contactsToSend = allUserContacts;
       console.log(`[executeBulkCampaign] Found ${contactsToSend.length} total contacts for all contacts mode`);
+      console.log(`[executeBulkCampaign] Sample contacts:`, contactsToSend.slice(0, 3).map(c => ({ name: c.name, phone: c.phoneNumber })));
       
     } else {
       // Load specific contact group

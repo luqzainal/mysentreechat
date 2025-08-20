@@ -64,6 +64,7 @@ function AddCampaignPage() {
   
   const [contactGroupsList, setContactGroupsList] = useState([]);
   const [selectedContactGroupId, setSelectedContactGroupId] = useState('');
+  const [userContactsCount, setUserContactsCount] = useState(0);
 
   const [userMediaList, setUserMediaList] = useState([]);
   const [selectedMediaItems, setSelectedMediaItems] = useState([]);
@@ -188,6 +189,8 @@ function AddCampaignPage() {
           determinedCampaignType === 'bulk' ? api.get('/contact-groups') : Promise.resolve({ data: [] }),
           // Fetch media for both bulk AND ai_chatbot campaigns (ai_chatbot also needs media library)
           (determinedCampaignType === 'bulk' || determinedCampaignType === 'ai_chatbot') ? api.get('/media') : Promise.resolve({ data: [] }),
+          // Fetch user contacts count for validation
+          determinedCampaignType === 'bulk' ? api.get('/contacts') : Promise.resolve({ data: [] }),
         ];
         
         // Add AI usage check for AI chatbot campaigns
@@ -198,7 +201,7 @@ function AddCampaignPage() {
           }));
         }
         
-        const [devResponse, groupsResponse, mediaResponse, aiUsageResponse] = await Promise.all(apiCalls);
+        const [devResponse, groupsResponse, mediaResponse, contactsResponse, aiUsageResponse] = await Promise.all(apiCalls);
 
         const fetchedDevices = devResponse.data || [];
         console.log('[AddCampaignPage] Fetched devices:', fetchedDevices);
@@ -220,6 +223,11 @@ function AddCampaignPage() {
           console.log('[AddCampaignPage] Mapped contact groups:', mappedContactGroups);
           setContactGroupsList(mappedContactGroups);
           setUserMediaList(mediaResponse.data || []);
+          
+          // Set user contacts count for validation
+          const userContacts = contactsResponse.data || [];
+          setUserContactsCount(userContacts.length);
+          console.log('[AddCampaignPage] User contacts count:', userContacts.length);
         } else if (determinedCampaignType === 'ai_chatbot') {
           // Set media list for AI chatbot (needed for media library selection)
           setUserMediaList(mediaResponse.data || []);
@@ -742,6 +750,13 @@ function AddCampaignPage() {
             setIsSaving(false);
             return;
         }
+        
+        // Validate "all_contacts" option
+        if (selectedContactGroupId === 'all_contacts' && userContactsCount === 0) {
+            toast.error("You have no contacts to send to. Please add contacts first by going to Upload Contacts page.");
+            setIsSaving(false);
+            return;
+        }
         Object.keys(formData).forEach(key => {
             if (key === 'mediaFile' && formData[key]) {
                 if (selectedMediaItems.length === 0) dataPayload.append(key, formData.mediaFile);
@@ -1000,7 +1015,7 @@ function AddCampaignPage() {
                             {selectedContactGroupId ? 
                                 (() => {
                                     if (selectedContactGroupId === 'all_contacts') {
-                                        return '📧 All Contacts (Send to all contacts)';
+                                        return `📧 All Contacts (${userContactsCount} contacts)`;
                                     }
                                     const selectedGroup = contactGroupsList.find(group => group._id === selectedContactGroupId);
                                     return selectedGroup ? `👥 ${selectedGroup.name} (${selectedGroup.count} contacts)` : 'Select contact group...';
@@ -1011,7 +1026,13 @@ function AddCampaignPage() {
                         </SelectTrigger>
                         <SelectContent>
                         {/* Option untuk semua kontak */}
-                        <SelectItem value="all_contacts">📧 All Contacts (Send to all contacts)</SelectItem>
+                        <SelectItem value="all_contacts" disabled={userContactsCount === 0}>
+                            📧 All Contacts 
+                            {userContactsCount > 0 ? 
+                                ` (${userContactsCount} contacts)` : 
+                                ' (No contacts available - please add contacts first)'
+                            }
+                        </SelectItem>
                         
                         {contactGroupsList.length === 0 && (
                           <div className="p-2 text-sm text-muted-foreground space-y-2">
