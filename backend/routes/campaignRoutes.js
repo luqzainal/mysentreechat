@@ -247,14 +247,39 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
         // Handle different formats of mediaAttachments
         let mediaIds = [];
         
+        console.log(`[Campaign Creation] mediaAttachments received:`, {
+            type: typeof mediaAttachments,
+            value: mediaAttachments,
+            isArray: Array.isArray(mediaAttachments)
+        });
+        
         if (Array.isArray(mediaAttachments)) {
             mediaIds = mediaAttachments;
+            console.log(`[Campaign Creation] Using array mediaAttachments: ${mediaIds.length} items`);
         } else if (typeof mediaAttachments === 'string') {
-            try {
-                mediaIds = JSON.parse(mediaAttachments);
-            } catch (e) {
-                // If it's a single ID as string
-                mediaIds = [mediaAttachments];
+            if (mediaAttachments.trim() === '' || mediaAttachments.trim() === '[]') {
+                mediaIds = [];
+                console.log(`[Campaign Creation] Empty mediaAttachments string`);
+            } else {
+                try {
+                    const parsed = JSON.parse(mediaAttachments);
+                    if (Array.isArray(parsed)) {
+                        mediaIds = parsed;
+                        console.log(`[Campaign Creation] Parsed JSON mediaAttachments: ${mediaIds.length} items`);
+                    } else {
+                        // If it's a single ID as string
+                        mediaIds = [mediaAttachments];
+                        console.log(`[Campaign Creation] Using single ID as array: ${mediaAttachments}`);
+                    }
+                } catch (e) {
+                    console.warn(`[Campaign Creation] mediaAttachments string could not be parsed as JSON array:`, {
+                        value: mediaAttachments,
+                        error: e.message
+                    });
+                    // If it's a single ID as string
+                    mediaIds = [mediaAttachments];
+                    console.log(`[Campaign Creation] Fallback to single ID: ${mediaAttachments}`);
+                }
             }
         } else {
             // If it's a single value
@@ -581,19 +606,47 @@ router.put('/:deviceId/:campaignId', validateDeviceAccess, uploadMedia, async (r
         // Kendalikan media
         let finalMediaAttachmentIds = [...campaign.mediaAttachments]; // Mulakan dengan yang sedia ada
 
-        if (mediaAttachments) { // Jika ada arahan dari body untuk mediaAttachments
+        if (mediaAttachments !== undefined) { // Jika ada arahan dari body untuk mediaAttachments
             let newAttachmentIds = [];
-            if (Array.isArray(mediaAttachments)) { // Jika ia array ID
+            
+            console.log(`[Campaign Update] mediaAttachments received:`, {
+                type: typeof mediaAttachments,
+                value: mediaAttachments,
+                isArray: Array.isArray(mediaAttachments)
+            });
+            
+            if (Array.isArray(mediaAttachments)) { 
+                // Jika ia array ID
                 newAttachmentIds = mediaAttachments;
+                console.log(`[Campaign Update] Using array mediaAttachments: ${newAttachmentIds.length} items`);
             } else if (typeof mediaAttachments === 'string') {
-                try {
-                    const parsed = JSON.parse(mediaAttachments); // Cuba parse jika string "[]" atau "[id1, id2]"
-                    if (Array.isArray(parsed)) {
-                        newAttachmentIds = parsed;
+                if (mediaAttachments.trim() === '' || mediaAttachments.trim() === '[]') {
+                    // Empty string or empty array string
+                    newAttachmentIds = [];
+                    console.log(`[Campaign Update] Empty mediaAttachments string, clearing media`);
+                } else {
+                    try {
+                        const parsed = JSON.parse(mediaAttachments); // Cuba parse jika string "[]" atau "[id1, id2]"
+                        if (Array.isArray(parsed)) {
+                            newAttachmentIds = parsed;
+                            console.log(`[Campaign Update] Parsed JSON mediaAttachments: ${newAttachmentIds.length} items`);
+                        } else {
+                            console.warn(`[Campaign Update] Parsed mediaAttachments is not an array:`, parsed);
+                        }
+                    } catch(e) {
+                        console.warn(`[Campaign Update] mediaAttachments string could not be parsed as JSON array:`, {
+                            value: mediaAttachments,
+                            error: e.message
+                        });
+                        // Keep existing media if cannot parse
+                        console.log(`[Campaign Update] Keeping existing media due to parse error`);
+                        newAttachmentIds = [...campaign.mediaAttachments];
                     }
-                } catch(e) {
-                    console.warn("mediaAttachments string could not be parsed as JSON array. Ignoring.");
                 }
+            } else if (mediaAttachments === null) {
+                // Explicitly clear media
+                newAttachmentIds = [];
+                console.log(`[Campaign Update] mediaAttachments is null, clearing media`);
             }
             
             // Sahkan semua ID media baru dan pastikan ia milik pengguna
