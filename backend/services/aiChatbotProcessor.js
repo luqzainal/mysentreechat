@@ -9,6 +9,8 @@ class AIChatbotProcessor {
         this.activeCampaigns = new Map(); // userId -> campaigns[]
         this.lastRefresh = new Map(); // userId -> timestamp
         this.refreshInterval = 60000; // Refresh campaigns every 60 seconds
+        this.processedMessages = new Map(); // Track processed messages to prevent duplicates
+        this.messageTimeout = 30000; // 30 seconds timeout for message deduplication
     }
 
     // Get active AI chatbot campaigns for a user
@@ -73,6 +75,24 @@ class AIChatbotProcessor {
                 });
                 return false;
             }
+            
+            // DEDUPLICATION: Check if message already processed
+            const messageKey = `${userId}-${remoteJid}-${messageId || messageText}`;
+            const now = Date.now();
+            
+            if (this.processedMessages.has(messageKey)) {
+                const processedTime = this.processedMessages.get(messageKey);
+                if (now - processedTime < this.messageTimeout) {
+                    console.log(`[AIChatbotProcessor] DUPLICATE MESSAGE DETECTED - skipping: "${messageText}" (processed ${now - processedTime}ms ago)`);
+                    return false;
+                }
+            }
+            
+            // Mark message as being processed
+            this.processedMessages.set(messageKey, now);
+            
+            // Clean up old entries to prevent memory leak
+            this.cleanupProcessedMessages();
             
             console.log(`[AIChatbotProcessor] Processing message from ${remoteJid} for user ${userId}: "${messageText}"`);
 
@@ -752,6 +772,24 @@ class AIChatbotProcessor {
     async refreshCampaigns(userId) {
         this.lastRefresh.delete(userId); // Force refresh
         return await this.getActiveCampaigns(userId);
+    }
+    
+    // Clean up old processed messages to prevent memory leak
+    cleanupProcessedMessages() {
+        const now = Date.now();
+        const keysToDelete = [];
+        
+        for (const [key, timestamp] of this.processedMessages.entries()) {
+            if (now - timestamp > this.messageTimeout * 2) { // Keep for 2x timeout period
+                keysToDelete.push(key);
+            }
+        }
+        
+        keysToDelete.forEach(key => this.processedMessages.delete(key));
+        
+        if (keysToDelete.length > 0) {
+            console.log(`[AIChatbotProcessor] Cleaned up ${keysToDelete.length} old processed message entries`);
+        }
     }
 }
 

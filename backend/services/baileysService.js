@@ -40,7 +40,7 @@ const processIncomingMessage = async (userId, msg) => {
     if (messageText.trim()) {
       const chatbotData = {
         messageId: msg.key.id,
-        chatJid: msg.key.remoteJid,
+        remoteJid: msg.key.remoteJid,
         messageText: messageText,
         timestamp: parseInt(msg.messageTimestamp) || Math.floor(Date.now() / 1000)
       };
@@ -67,35 +67,12 @@ const createCustomLogger = (userId) => {
       // Check if this is a message-related log
       const logData = args[0];
       if (logData && typeof logData === 'object') {
-        // Look for incoming message patterns
-        if (logData.recv && logData.recv.tag === 'message' && 
+        // Look for incoming message patterns (DISABLED to prevent duplicate processing)
+        if (false && logData.recv && logData.recv.tag === 'message' && 
             logData.recv.attrs && logData.recv.attrs.from && 
             logData.recv.attrs.type === 'text') {
           
-          console.log(`[BAILEYS LOG INTERCEPT] Detected incoming text message for user ${userId}:`, logData.recv.attrs);
-          
-          // Extract message data and trigger AI processing
-          const messageAttrs = logData.recv.attrs;
-          
-          // Create message data structure
-          const messageData = {
-            messageId: messageAttrs.id,
-            chatJid: messageAttrs.from,
-            messageText: 'Intercepted Message', // We'll get actual text from database later
-            timestamp: parseInt(messageAttrs.t)
-          };
-          
-          console.log(`[BAILEYS LOG INTERCEPT] Processing intercepted message for AI chatbot...`);
-          
-          // Process with AI chatbot immediately
-          setTimeout(async () => {
-            try {
-              const aiChatbotProcessor = require('./aiChatbotProcessor.js');
-              await aiChatbotProcessor.processMessage(userId, 'intercepted', messageData);
-            } catch (error) {
-              console.error(`[BAILEYS LOG INTERCEPT] Error processing intercepted message:`, error);
-            }
-          }, 1000); // Small delay to ensure message is received
+          console.log(`[BAILEYS LOG INTERCEPT] Message intercept disabled to prevent duplicates`);
         }
       }
     } catch (error) {
@@ -611,53 +588,33 @@ async function connectToWhatsApp(userId) {
     sock.ev.emit('test-event', { test: 'data' });
     console.log(`[BAILEYS TEST] Test event emitted for user ${userId}`);
 
-    // CRITICAL FIX: Direct message monitoring using setInterval as fallback
-    const messageMonitor = setInterval(async () => {
+    // DISABLED: Direct message monitoring to prevent duplicate processing
+    // The main message processing happens in processIncomingMessage function
+    console.log(`[BAILEYS MONITOR] Message monitor disabled to prevent duplicate AI responses`);
+    
+    // Optional: Keep a simple monitor for debugging only (no AI processing)
+    const debugMonitor = setInterval(async () => {
       try {
         if (!clients.has(userId)) {
-          console.log(`[BAILEYS MONITOR] Client no longer exists for user ${userId}, clearing monitor`);
-          clearInterval(messageMonitor);
+          console.log(`[BAILEYS DEBUG] Client no longer exists for user ${userId}, clearing debug monitor`);
+          clearInterval(debugMonitor);
           return;
         }
         
-        // Check for very recent unprocessed messages (last 30 seconds)
-        const thirtySecondsAgo = new Date(Date.now() - 30000);
+        // Just log stats, no processing
         const recentMessages = await Message.find({
           user: userId,
-          timestamp: { $gte: thirtySecondsAgo },
-          fromMe: false,
-          $or: [
-            { processed: { $exists: false } },
-            { processed: false }
-          ]
-        }).sort({ timestamp: -1 }).limit(3);
+          timestamp: { $gte: new Date(Date.now() - 60000) },
+          fromMe: false
+        }).countDocuments();
         
-        if (recentMessages.length > 0) {
-          console.log(`[BAILEYS MONITOR] Found ${recentMessages.length} unprocessed recent messages for user ${userId}`);
-          
-          for (const msg of recentMessages) {
-            console.log(`[BAILEYS MONITOR] Processing message: "${msg.body}" from ${msg.chatJid}`);
-            
-            // Process with AI chatbot
-            const aiChatbotProcessor = require('./aiChatbotProcessor.js');
-            const chatbotData = {
-              messageId: msg.messageId,
-              chatJid: msg.chatJid,
-              messageText: msg.body,
-              timestamp: Math.floor(msg.timestamp.getTime() / 1000)
-            };
-            
-            await aiChatbotProcessor.processMessage(userId, msg.sourceDeviceId || 'unknown', chatbotData);
-            
-            // Mark as processed
-            await Message.updateOne({ _id: msg._id }, { processed: true });
-            console.log(`[BAILEYS MONITOR] Marked message ${msg._id} as processed`);
-          }
+        if (recentMessages > 0) {
+          console.log(`[BAILEYS DEBUG] User ${userId} has ${recentMessages} recent messages in last minute`);
         }
       } catch (error) {
-        console.error(`[BAILEYS MONITOR] Error in message monitor for user ${userId}:`, error);
+        console.error(`[BAILEYS DEBUG] Error in debug monitor for user ${userId}:`, error);
       }
-    }, 15000); // Check every 15 seconds
+    }, 60000); // Check every minute for debug only
     
     console.log(`[BAILEYS MONITOR] Message monitor started for user ${userId}`);
 
