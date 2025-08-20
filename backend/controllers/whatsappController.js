@@ -303,6 +303,8 @@ const executeBulkCampaign = async (req, res) => {
     // Handle "all_contacts" special value or load specific contact group
     let contactsToSend = [];
     
+    console.log(`[executeBulkCampaign] Processing contactGroupId: "${campaign.contactGroupId}" (type: ${typeof campaign.contactGroupId})`);
+    
     if (campaign.contactGroupId === 'all_contacts') {
       console.log(`[executeBulkCampaign] Using all contacts mode for user: ${userId}`);
       
@@ -331,46 +333,64 @@ const executeBulkCampaign = async (req, res) => {
       console.log(`[executeBulkCampaign] Sample contacts:`, contactsToSend.slice(0, 3).map(c => ({ name: c.name, phone: c.phoneNumber })));
       
     } else {
-      // Load specific contact group
-      let contactGroup = await ContactGroup.findOne({
-        _id: campaign.contactGroupId,
-        user: userId
-      }).populate('contacts');
-
-      if (!contactGroup) {
-        return res.status(400).json({ 
-          message: 'Contact group not found' 
-        });
-      }
-
-      // If contact group exists but has no contacts, try to auto-assign all user contacts
-      if (!contactGroup.contacts || contactGroup.contacts.length === 0) {
-        console.log(`[executeBulkCampaign] Contact group ${contactGroup.groupName} is empty. Auto-assigning all user contacts...`);
+      // Check if contactGroupId is actually 'all_contacts' (edge case handling)
+      if (campaign.contactGroupId === 'all_contacts') {
+        console.log(`[executeBulkCampaign] Found 'all_contacts' in else branch - redirecting to all contacts mode`);
         
-        // Get all user contacts
+        // Get all user contacts directly
         const allUserContacts = await Contact.find({ user: userId });
-        
         if (allUserContacts.length === 0) {
           return res.status(400).json({ 
-            message: 'No contacts found. Please add contacts first.' 
+            success: false,
+            message: 'No contacts found in your account. Please add contacts first by going to Upload Contacts page.'
           });
         }
-
-        // Add all contacts to the group
-        contactGroup.contacts = allUserContacts.map(contact => contact._id);
-        contactGroup.contactCount = allUserContacts.length;
-        await contactGroup.save();
         
-        // Reload with populated contacts
-        contactGroup = await ContactGroup.findOne({
+        contactsToSend = allUserContacts;
+        console.log(`[executeBulkCampaign] Redirected to all contacts mode: ${contactsToSend.length} contacts`);
+      } else {
+        // Load specific contact group
+        let contactGroup = await ContactGroup.findOne({
           _id: campaign.contactGroupId,
           user: userId
         }).populate('contacts');
 
-        console.log(`[executeBulkCampaign] Auto-assigned ${allUserContacts.length} contacts to group ${contactGroup.groupName}`);
+        if (!contactGroup) {
+          console.log(`[executeBulkCampaign] Contact group not found for ID: ${campaign.contactGroupId}`);
+          return res.status(400).json({ 
+            message: 'Contact group not found' 
+          });
+        }
+
+        // If contact group exists but has no contacts, try to auto-assign all user contacts
+        if (!contactGroup.contacts || contactGroup.contacts.length === 0) {
+          console.log(`[executeBulkCampaign] Contact group ${contactGroup.groupName} is empty. Auto-assigning all user contacts...`);
+          
+          // Get all user contacts
+          const allUserContacts = await Contact.find({ user: userId });
+          
+          if (allUserContacts.length === 0) {
+            return res.status(400).json({ 
+              message: 'No contacts found. Please add contacts first.' 
+            });
+          }
+
+          // Add all contacts to the group
+          contactGroup.contacts = allUserContacts.map(contact => contact._id);
+          contactGroup.contactCount = allUserContacts.length;
+          await contactGroup.save();
+          
+          // Reload with populated contacts
+          contactGroup = await ContactGroup.findOne({
+            _id: campaign.contactGroupId,
+            user: userId
+          }).populate('contacts');
+
+          console.log(`[executeBulkCampaign] Auto-assigned ${allUserContacts.length} contacts to group ${contactGroup.groupName}`);
+        }
+        
+        contactsToSend = contactGroup.contacts;
       }
-      
-      contactsToSend = contactGroup.contacts;
     }
 
     const contacts = contactsToSend;
