@@ -72,16 +72,72 @@ class AIChatbotProcessor {
                 return false;
             }
 
-            // Check for ongoing conversations first
+            // PRIORITY 1: Check stop keywords from ALL campaigns FIRST (highest priority)
+            console.log(`[AIChatbotProcessor] PRIORITY 1: Checking stop keywords across all campaigns`);
+            for (const campaign of activeCampaigns) {
+                if (campaign.endConversationKeywords && campaign.endConversationKeywords.trim()) {
+                    const hasStopKeyword = conversationService.hasEndKeyword(messageText, campaign.endConversationKeywords);
+                    if (hasStopKeyword) {
+                        console.log(`[AIChatbotProcessor] STOP KEYWORD detected in campaign ${campaign._id}. Ending any ongoing conversation.`);
+                        // End any ongoing conversation
+                        conversationService.endConversation(userId, remoteJid);
+                        return true; // Stop all processing - no response needed
+                    }
+                }
+            }
+
+            // PRIORITY 2: Check ongoing conversation BUT respect new keyword matches
             let conversationCampaign = null;
             const conversationStatus = conversationService.getConversationStatus(userId, remoteJid);
             
+            // PRIORITY 3: Check keyword campaigns (higher priority than continuing conversation)
+            const keywordCampaigns = activeCampaigns.filter(c => 
+                c.isNotMatchDefaultResponse !== 'yes' && 
+                c.isNotMatchDefaultResponse !== true
+            );
+            const defaultResponseCampaigns = activeCampaigns.filter(c => 
+                c.isNotMatchDefaultResponse === 'yes' || 
+                c.isNotMatchDefaultResponse === true
+            );
+
+            console.log(`[AIChatbotProcessor] PRIORITY 3: Checking ${keywordCampaigns.length} keyword campaigns`);
+
+            // Check keyword campaigns first - they can override ongoing conversations
+            for (const campaign of keywordCampaigns) {
+                const shouldRespond = this.checkMessageMatch(campaign, messageText, remoteJid);
+                
+                if (shouldRespond) {
+                    console.log(`[AIChatbotProcessor] KEYWORD CAMPAIGN ${campaign._id} (${campaign.name}) matched message. This overrides any ongoing conversation.`);
+                    
+                    // End any existing conversation since we're starting a new keyword-based response
+                    if (conversationStatus) {
+                        console.log(`[AIChatbotProcessor] Ending previous conversation to start keyword campaign`);
+                        conversationService.endConversation(userId, remoteJid);
+                    }
+                    
+                    // Start conversation if in continuous mode
+                    if (campaign.conversationMode === 'continuous_chat') {
+                        conversationService.startConversation(userId, remoteJid, campaign._id.toString());
+                    }
+                    
+                    await this.sendChatbotResponse(userId, deviceId, campaign, remoteJid, messageText, false);
+                    
+                    // Update campaign statistics
+                    await Campaign.findByIdAndUpdate(campaign._id, {
+                        $inc: { 'aiStats.totalInteractions': 1 }
+                    });
+
+                    return true; // Stop processing after first match
+                }
+            }
+
+            // PRIORITY 4: Continue ongoing conversation ONLY if no keyword campaigns matched
             if (conversationStatus) {
                 // Find the campaign for ongoing conversation
                 conversationCampaign = activeCampaigns.find(c => c._id.toString() === conversationStatus.campaignId);
                 
                 if (conversationCampaign && conversationService.shouldContinueConversation(userId, remoteJid, conversationCampaign, messageText)) {
-                    console.log(`[AIChatbotProcessor] Continuing conversation with campaign ${conversationCampaign._id}`);
+                    console.log(`[AIChatbotProcessor] PRIORITY 4: Continuing conversation with campaign ${conversationCampaign._id} (no keyword override)`);
                     console.log(`[AIChatbotProcessor] Campaign conversation settings:`);
                     console.log(`  conversationMode: ${conversationCampaign.conversationMode}`);
                     console.log(`  maxConversationBubbles: ${conversationCampaign.maxConversationBubbles}`);
@@ -102,47 +158,16 @@ class AIChatbotProcessor {
                 }
             }
 
-            // Separate campaigns by type for proper priority
-            const keywordCampaigns = activeCampaigns.filter(c => 
-                c.isNotMatchDefaultResponse !== 'yes' && 
-                c.isNotMatchDefaultResponse !== true
-            );
-            const defaultResponseCampaigns = activeCampaigns.filter(c => 
-                c.isNotMatchDefaultResponse === 'yes' || 
-                c.isNotMatchDefaultResponse === true
-            );
+            console.log(`[AIChatbotProcessor] PRIORITY 5: Checking ${defaultResponseCampaigns.length} default response campaigns`);
 
-            console.log(`[AIChatbotProcessor] Processing ${keywordCampaigns.length} keyword campaigns and ${defaultResponseCampaigns.length} default response campaigns`);
+            // PRIORITY 5: Check default response campaigns (AI fallback) - lowest priority
 
-            // Check keyword campaigns first (higher priority)
-            for (const campaign of keywordCampaigns) {
-                const shouldRespond = this.checkMessageMatch(campaign, messageText, remoteJid);
-                
-                if (shouldRespond) {
-                    console.log(`[AIChatbotProcessor] Keyword campaign ${campaign._id} (${campaign.name}) matched message. Sending response...`);
-                    
-                    // Start conversation if in continuous mode
-                    if (campaign.conversationMode === 'continuous_chat') {
-                        conversationService.startConversation(userId, remoteJid, campaign._id.toString());
-                    }
-                    
-                    await this.sendChatbotResponse(userId, deviceId, campaign, remoteJid, messageText, false);
-                    
-                    // Update campaign statistics
-                    await Campaign.findByIdAndUpdate(campaign._id, {
-                        $inc: { 'aiStats.totalInteractions': 1 }
-                    });
-
-                    return true; // Stop processing after first match
-                }
-            }
-
-            // If no keyword campaigns matched, try default response campaigns
+            // PRIORITY 5: If no keyword campaigns matched, try default response campaigns (AI fallback)
             for (const campaign of defaultResponseCampaigns) {
                 const shouldRespond = this.checkMessageMatch(campaign, messageText, remoteJid);
                 
                 if (shouldRespond) {
-                    console.log(`[AIChatbotProcessor] Default response campaign ${campaign._id} (${campaign.name}) matched message. Sending response...`);
+                    console.log(`[AIChatbotProcessor] PRIORITY 5: DEFAULT RESPONSE campaign ${campaign._id} (${campaign.name}) matched message. Sending AI fallback response...`);
                     
                     // Start conversation if in continuous mode
                     if (campaign.conversationMode === 'continuous_chat') {

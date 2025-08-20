@@ -6,3 +6,11 @@
 .idea
 *.log
 node_modules/
+.env.production
+.env.development
+.env.local
+.env.staging
+.env.test
+.env.test.local
+.env.test.local.example
+.env.test.local.example
