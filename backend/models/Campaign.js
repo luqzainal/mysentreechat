@@ -200,11 +200,18 @@ const campaignSchema = new mongoose.Schema({
     active: { type: Boolean, default: false }
   }],
   // BARU: Untuk kempen pukal, simpan ID kumpulan kenalan yang digunakan
+  // Support both ObjectId for real contact groups and String for special values like 'all_contacts'
   contactGroupId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ContactGroup',
+    type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
     required: function() { // Hanya diperlukan jika campaignType adalah 'bulk'
         return this.campaignType === 'bulk';
+    },
+    validate: {
+      validator: function(value) {
+        // Allow 'all_contacts' as string or valid ObjectId
+        return value === 'all_contacts' || mongoose.Types.ObjectId.isValid(value);
+      },
+      message: 'contactGroupId must be either "all_contacts" or a valid ObjectId'
     }
   },
   // BARU: Untuk penjadualan kempen pukal

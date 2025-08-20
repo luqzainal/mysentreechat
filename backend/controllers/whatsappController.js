@@ -305,7 +305,44 @@ const executeBulkCampaign = async (req, res) => {
     
     console.log(`[executeBulkCampaign] Processing contactGroupId: "${campaign.contactGroupId}" (type: ${typeof campaign.contactGroupId})`);
     
-    if (campaign.contactGroupId === 'all_contacts') {
+    // Convert ObjectId to string for comparison and check both string and ObjectId formats
+    const contactGroupIdStr = campaign.contactGroupId ? campaign.contactGroupId.toString() : '';
+    console.log(`[executeBulkCampaign] ContactGroupId as string: "${contactGroupIdStr}"`);
+    
+    // Helper function to check if an ObjectId represents 'all_contacts'
+    const isAllContactsObjectId = (objectId) => {
+      try {
+        if (!objectId) return false;
+        const hex = objectId.toString();
+        console.log(`[executeBulkCampaign] Checking hex: ${hex}`);
+        
+        // Check if hex represents 'all_contacts' in ASCII
+        // 'all_contacts' = 616c6c5f636f6e7461637473 in hex
+        if (hex === '616c6c5f636f6e7461637473') {
+          console.log(`[executeBulkCampaign] Exact match for all_contacts hex`);
+          return true;
+        }
+        
+        // Try to decode hex to ASCII and check
+        const decoded = Buffer.from(hex, 'hex').toString('ascii');
+        console.log(`[executeBulkCampaign] Decoded hex to ASCII: "${decoded}"`);
+        const isMatch = decoded === 'all_contacts';
+        console.log(`[executeBulkCampaign] ASCII decode match: ${isMatch}`);
+        return isMatch;
+      } catch (error) {
+        console.log(`[executeBulkCampaign] Error decoding ObjectId: ${error.message}`);
+        return false;
+      }
+    };
+    
+    // Check if it's 'all_contacts' - handle both string and ObjectId that represents 'all_contacts'
+    const isAllContactsMode = contactGroupIdStr === 'all_contacts' || 
+                              campaign.contactGroupId === 'all_contacts' ||
+                              isAllContactsObjectId(campaign.contactGroupId);
+    
+    console.log(`[executeBulkCampaign] Is all contacts mode: ${isAllContactsMode}`);
+    
+    if (isAllContactsMode) {
       console.log(`[executeBulkCampaign] Using all contacts mode for user: ${userId}`);
       
       // Get all user contacts directly
@@ -334,7 +371,12 @@ const executeBulkCampaign = async (req, res) => {
       
     } else {
       // Check if contactGroupId is actually 'all_contacts' (edge case handling)
-      if (campaign.contactGroupId === 'all_contacts') {
+      const contactGroupIdStr = campaign.contactGroupId ? campaign.contactGroupId.toString() : '';
+      const isAllContactsModeElse = contactGroupIdStr === 'all_contacts' || 
+                                    campaign.contactGroupId === 'all_contacts' ||
+                                    isAllContactsObjectId(campaign.contactGroupId);
+      
+      if (isAllContactsModeElse) {
         console.log(`[executeBulkCampaign] Found 'all_contacts' in else branch - redirecting to all contacts mode`);
         
         // Get all user contacts directly

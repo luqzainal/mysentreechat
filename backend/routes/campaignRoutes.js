@@ -1028,6 +1028,57 @@ router.get('/debug/ai-chatbot/:userId', async (req, res) => {
     }
 });
 
+// Migration endpoint to fix existing campaigns with 'all_contacts' stored as ObjectId
+router.post('/migrate/fix-all-contacts', protect, async (req, res) => {
+    try {
+        // Find campaigns with contactGroupId that might represent 'all_contacts' 
+        const campaigns = await Campaign.find({
+            campaignType: 'bulk'
+        });
+        
+        let fixedCount = 0;
+        const fixes = [];
+        
+        for (const campaign of campaigns) {
+            if (campaign.contactGroupId) {
+                const hex = campaign.contactGroupId.toString();
+                
+                // Check if this ObjectId represents 'all_contacts'
+                if (hex === '616c6c5f636f6e7461637473') {
+                    console.log(`[Migration] Fixing campaign ${campaign._id}: ${hex} -> 'all_contacts'`);
+                    
+                    await Campaign.findByIdAndUpdate(campaign._id, {
+                        contactGroupId: 'all_contacts'
+                    });
+                    
+                    fixedCount++;
+                    fixes.push({
+                        campaignId: campaign._id,
+                        campaignName: campaign.campaignName,
+                        before: hex,
+                        after: 'all_contacts'
+                    });
+                }
+            }
+        }
+        
+        res.json({
+            success: true,
+            message: `Migration completed. Fixed ${fixedCount} campaigns.`,
+            fixedCount,
+            fixes
+        });
+        
+    } catch (error) {
+        console.error('Error in migration:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Migration failed',
+            error: error.message
+        });
+    }
+});
+
 // Debug endpoint untuk check user contacts dan campaign readiness
 router.get('/debug/user-contacts', protect, async (req, res) => {
     try {
