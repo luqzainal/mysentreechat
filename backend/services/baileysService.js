@@ -694,6 +694,13 @@ async function connectToWhatsApp(userId) {
         const statusCode = lastDisconnect?.error?.output?.statusCode
         const reason = DisconnectReason[statusCode] || 'Unknown'
         const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        
+        // Special handling for connectionReplaced (440)
+        if (statusCode === 440) {
+          console.warn(`[Baileys] Connection replaced detected for user ${userId}. This usually means multiple instances or WhatsApp Web is open.`);
+          console.warn(`[Baileys] Waiting longer before reconnecting to avoid conflicts...`);
+        }
+        
         console.warn(`[Baileys] Connection closed for user ${userId}. StatusCode: ${statusCode}, Reason: ${reason}. Should Reconnect: ${shouldReconnect}.`, { error: lastDisconnect?.error })
 
         emit(userId, 'whatsapp_status', 'disconnected')
@@ -739,9 +746,15 @@ async function connectToWhatsApp(userId) {
 
         if (connection === 'close' && shouldReconnect) {
           console.log(`[Baileys] Restart required detected for user ${userId}. Attempting reconnect...`);
+          
+          // Use longer delay for connectionReplaced to avoid conflicts
+          const reconnectDelay = statusCode === 440 ? 10000 : 1000; // 10 seconds for connection replaced, 1 second for others
+          
+          console.log(`[Baileys] Reconnecting in ${reconnectDelay/1000} seconds...`);
           setTimeout(() => {
+            console.log(`[Baileys] Starting reconnection for user ${userId}...`);
             connectToWhatsApp(userId);
-          }, 1000);
+          }, reconnectDelay);
         }
       } else if (connection === 'open') {
         const deviceId = sock.user.id.split(':')[0].split('@')[0]

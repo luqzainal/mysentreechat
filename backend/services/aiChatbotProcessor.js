@@ -62,6 +62,18 @@ class AIChatbotProcessor {
         try {
             const { remoteJid, messageText, messageId, timestamp } = messageData;
             
+            // Safety checks for required parameters
+            if (!userId || !deviceId || !messageData || !remoteJid || !messageText) {
+                console.warn(`[AIChatbotProcessor] Invalid message data received:`, {
+                    hasUserId: !!userId,
+                    hasDeviceId: !!deviceId,
+                    hasMessageData: !!messageData,
+                    hasRemoteJid: !!remoteJid,
+                    hasMessageText: !!messageText
+                });
+                return false;
+            }
+            
             console.log(`[AIChatbotProcessor] Processing message from ${remoteJid} for user ${userId}: "${messageText}"`);
 
             // Get active campaigns
@@ -196,6 +208,16 @@ class AIChatbotProcessor {
 
     // Check if message matches campaign criteria
     checkMessageMatch(campaign, messageText, remoteJid) {
+        // Null/undefined safety checks
+        if (!campaign || !messageText || !remoteJid) {
+            console.warn(`[AIChatbotProcessor] Invalid parameters for checkMessageMatch:`, {
+                hasCampaign: !!campaign,
+                hasMessageText: !!messageText,
+                hasRemoteJid: !!remoteJid
+            });
+            return false;
+        }
+
         const lowerMessageText = messageText.toLowerCase();
 
         console.log(`[AIChatbotProcessor] Checking match for campaign ${campaign._id}:`, {
@@ -208,7 +230,7 @@ class AIChatbotProcessor {
             remoteJid: remoteJid
         });
 
-        // Check sendTo criteria
+        // Check sendTo criteria with null safety
         if (campaign.sendTo === 'group' && !remoteJid.includes('@g.us')) {
             console.log(`[AIChatbotProcessor] Campaign ${campaign._id} is for groups only, but message is individual. Skipping.`);
             return false;
