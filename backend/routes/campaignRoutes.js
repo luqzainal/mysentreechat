@@ -260,26 +260,29 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
             if (mediaAttachments.trim() === '' || mediaAttachments.trim() === '[]') {
                 mediaIds = [];
                 console.log(`[Campaign Creation] Empty mediaAttachments string`);
-            } else {
+            } else if (mediaAttachments.startsWith('[') && mediaAttachments.endsWith(']')) {
+                // Looks like JSON array string
                 try {
                     const parsed = JSON.parse(mediaAttachments);
                     if (Array.isArray(parsed)) {
                         mediaIds = parsed;
-                        console.log(`[Campaign Creation] Parsed JSON mediaAttachments: ${mediaIds.length} items`);
+                        console.log(`[Campaign Creation] Parsed JSON array mediaAttachments: ${mediaIds.length} items`);
                     } else {
-                        // If it's a single ID as string
                         mediaIds = [mediaAttachments];
-                        console.log(`[Campaign Creation] Using single ID as array: ${mediaAttachments}`);
+                        console.log(`[Campaign Creation] Parsed value not array, using as single ID: ${mediaAttachments}`);
                     }
                 } catch (e) {
-                    console.warn(`[Campaign Creation] mediaAttachments string could not be parsed as JSON array:`, {
+                    console.warn(`[Campaign Creation] JSON array parse failed:`, {
                         value: mediaAttachments,
                         error: e.message
                     });
-                    // If it's a single ID as string
                     mediaIds = [mediaAttachments];
                     console.log(`[Campaign Creation] Fallback to single ID: ${mediaAttachments}`);
                 }
+            } else {
+                // Single media ID string (most common case)
+                mediaIds = [mediaAttachments];
+                console.log(`[Campaign Creation] Single media ID string: ${mediaAttachments}`);
             }
         } else {
             // If it's a single value
@@ -624,24 +627,28 @@ router.put('/:deviceId/:campaignId', validateDeviceAccess, uploadMedia, async (r
                     // Empty string or empty array string
                     newAttachmentIds = [];
                     console.log(`[Campaign Update] Empty mediaAttachments string, clearing media`);
-                } else {
+                } else if (mediaAttachments.startsWith('[') && mediaAttachments.endsWith(']')) {
+                    // Looks like JSON array string
                     try {
-                        const parsed = JSON.parse(mediaAttachments); // Cuba parse jika string "[]" atau "[id1, id2]"
+                        const parsed = JSON.parse(mediaAttachments);
                         if (Array.isArray(parsed)) {
                             newAttachmentIds = parsed;
-                            console.log(`[Campaign Update] Parsed JSON mediaAttachments: ${newAttachmentIds.length} items`);
+                            console.log(`[Campaign Update] Parsed JSON array mediaAttachments: ${newAttachmentIds.length} items`);
                         } else {
-                            console.warn(`[Campaign Update] Parsed mediaAttachments is not an array:`, parsed);
+                            console.warn(`[Campaign Update] Parsed value is not an array:`, parsed);
+                            newAttachmentIds = [mediaAttachments]; // Fallback to single ID
                         }
                     } catch(e) {
-                        console.warn(`[Campaign Update] mediaAttachments string could not be parsed as JSON array:`, {
+                        console.warn(`[Campaign Update] JSON array parse failed:`, {
                             value: mediaAttachments,
                             error: e.message
                         });
-                        // Keep existing media if cannot parse
-                        console.log(`[Campaign Update] Keeping existing media due to parse error`);
-                        newAttachmentIds = [...campaign.mediaAttachments];
+                        newAttachmentIds = [mediaAttachments]; // Fallback to single ID
                     }
+                } else {
+                    // Single media ID string (most common case)
+                    newAttachmentIds = [mediaAttachments];
+                    console.log(`[Campaign Update] Single media ID string: ${mediaAttachments}`);
                 }
             } else if (mediaAttachments === null) {
                 // Explicitly clear media
