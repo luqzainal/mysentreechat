@@ -63,30 +63,74 @@ router.get('/dashboard/bulk-campaign-summary', protect, asyncHandler(async (req,
 router.get('/dashboard/overall-summary', protect, asyncHandler(async (req, res) => {
     const userId = req.user._id;
 
-    // Kira Total Messages (fromMe: true)
-    const totalMessages = await Message.countDocuments({
-        user: userId,
-        fromMe: true 
-    });
+    // Method 1: Count from Message model (individual message records)
+    const messageStats = await Message.aggregate([
+        {
+            $match: {
+                user: userId,
+                fromMe: true
+            }
+        },
+        {
+            $group: {
+                _id: null,
+                totalMessages: { $sum: 1 },
+                sentMessages: {
+                    $sum: {
+                        $cond: [
+                            { $in: ['$status', ['sent', 'delivered', 'read']] },
+                            1,
+                            0
+                        ]
+                    }
+                },
+                failedFromMessages: {
+                    $sum: {
+                        $cond: [
+                            { $eq: ['$status', 'failed'] },
+                            1,
+                            0
+                        ]
+                    }
+                }
+            }
+        }
+    ]);
 
-    // Kira Sent Messages (status: sent, delivered, read dan fromMe: true)
-    const sentMessages = await Message.countDocuments({
-        user: userId,
-        fromMe: true,
-        status: { $in: ['sent', 'delivered', 'read'] } 
-    });
+    // Method 2: Count from Campaign model (aggregated counts)
+    const campaignStats = await Campaign.aggregate([
+        {
+            $match: {
+                userId: userId
+            }
+        },
+        {
+            $group: {
+                _id: null,
+                totalFromCampaigns: { $sum: { $add: ['$sentCount', '$failedCount'] } },
+                sentFromCampaigns: { $sum: '$sentCount' },
+                failedFromCampaigns: { $sum: '$failedCount' }
+            }
+        }
+    ]);
 
-    // Kira Failed Messages (status: failed dan fromMe: true)
-    const failedMessages = await Message.countDocuments({
-        user: userId,
-        fromMe: true,
-        status: 'failed' 
+    // Use data from both sources, prioritizing campaign data for accuracy
+    const messageData = messageStats[0] || { totalMessages: 0, sentMessages: 0, failedFromMessages: 0 };
+    const campaignData = campaignStats[0] || { totalFromCampaigns: 0, sentFromCampaigns: 0, failedFromCampaigns: 0 };
+
+    // Combine results - use campaign data as primary source since it's more reliable
+    const totalMessages = Math.max(messageData.totalMessages, campaignData.totalFromCampaigns);
+    const sentMessages = Math.max(messageData.sentMessages, campaignData.sentFromCampaigns);
+    const failedMessages = Math.max(messageData.failedFromMessages, campaignData.failedFromCampaigns);
+
+    console.log('[Analytics] Dashboard Summary:', {
+        messageData,
+        campaignData,
+        result: { totalMessages, sentMessages, failedMessages }
     });
 
     res.json({
-        totalMessages, // Ini mungkin total semua mesej keluar, bukan total keseluruhan sistem seperti dalam imej.
-                       // Imej menunjukkan "Total 31,845 Messages" yang mungkin termasuk mesej masuk atau had pelan.
-                       // Untuk sekarang, kita kira mesej keluar.
+        totalMessages,
         sentMessages,
         failedMessages
     });
