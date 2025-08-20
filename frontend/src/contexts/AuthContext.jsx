@@ -52,11 +52,34 @@ export const AuthProvider = ({ children }) => {
      console.log("AuthContext: Pengguna log keluar");
   };
 
+  // Fungsi untuk refresh user data dari server
+  const refreshUserData = async () => {
+    try {
+      const response = await api.get('/auth/me'); // Endpoint untuk get current user
+      const updatedUserData = response.data.user;
+      
+      // Update localStorage dengan data terbaru
+      localStorage.setItem('userInfo', JSON.stringify(updatedUserData));
+      setUser(updatedUserData);
+      
+      console.log("AuthContext: User data refreshed successfully", updatedUserData);
+      return updatedUserData;
+    } catch (error) {
+      console.error("AuthContext: Failed to refresh user data", error);
+      // Jika token expired, logout user
+      if (error.response?.status === 401) {
+        logout();
+      }
+      throw error;
+    }
+  };
+
   const value = {
     user,
     setUser, // Mungkin diperlukan untuk kemaskini profil
     login,
     logout,
+    refreshUserData, // Tambah function refresh user data
     loading, // Tambah loading state
     isAuthenticated: !!user // Cara mudah check jika pengguna sudah log masuk
   };

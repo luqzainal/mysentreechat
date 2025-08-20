@@ -33,7 +33,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Pencil, ShieldCheck, UserX, Trash2 } from 'lucide-react'; // Import new icons
+import { Input } from "@/components/ui/input";
+import { Pencil, ShieldCheck, UserX, Trash2, Key } from 'lucide-react'; // Import new icons
 import {
   AlertDialog,
   AlertDialogContent,
@@ -54,6 +55,10 @@ const UserListPage = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
     const { user: loggedInUser } = useAuth(); // Rename user from context
+    
+    // State for server device usage
+    const [deviceUsage, setDeviceUsage] = useState(null);
+    const [isLoadingDeviceUsage, setIsLoadingDeviceUsage] = useState(false);
 
     // State for edit plan dialog
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -72,8 +77,28 @@ const UserListPage = () => {
     const [userForDeletion, setUserForDeletion] = useState(null);
     const [isDeletingUser, setIsDeletingUser] = useState(false);
 
+    // State untuk password reset dialog
+    const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+    const [userForPasswordReset, setUserForPasswordReset] = useState(null);
+    const [newPassword, setNewPassword] = useState('');
+    const [isSettingPassword, setIsSettingPassword] = useState(false);
+
     // Function to get token (not needed if interceptor works)
     // const getToken = () => { ... };
+
+    // Fetch device usage data
+    const fetchDeviceUsage = async () => {
+        setIsLoadingDeviceUsage(true);
+        try {
+            const { data } = await api.get('/whatsapp/server/device-usage');
+            setDeviceUsage(data);
+        } catch (err) {
+            console.error("Error getting device usage:", err);
+            // Don't show toast error for device usage as it's supplementary data
+        } finally {
+            setIsLoadingDeviceUsage(false);
+        }
+    };
 
     // Fetch users (use api instance)
     useEffect(() => {
@@ -84,6 +109,9 @@ const UserListPage = () => {
                 // Token added by interceptor
                 const { data } = await api.get('/admin/users');
                 setUsers(data);
+                
+                // Fetch device usage after users are loaded
+                fetchDeviceUsage();
             } catch (err) {
                 console.error("Error getting user list:", err); // Translate error log
                 const message = err.response?.data?.message || "Failed to get user list."; // Translate error message
@@ -210,6 +238,45 @@ const UserListPage = () => {
         }
     };
 
+    // Function to open password reset dialog
+    const handleOpenPasswordDialog = (userToReset) => {
+        setUserForPasswordReset(userToReset);
+        setNewPassword(''); // Reset password field
+        setIsPasswordDialogOpen(true);
+    };
+
+    // Function to set new password for user
+    const handleSetNewPassword = async () => {
+        if (!userForPasswordReset || !newPassword.trim()) {
+            toast.error("Please enter a password.");
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            toast.error("Password must be at least 6 characters long.");
+            return;
+        }
+
+        setIsSettingPassword(true);
+        try {
+            await api.put(`/admin/users/${userForPasswordReset._id}/password`, {
+                newPassword: newPassword.trim()
+            });
+
+            toast.success(`Password for ${userForPasswordReset.name} has been updated successfully.`);
+            setIsPasswordDialogOpen(false);
+            setUserForPasswordReset(null);
+            setNewPassword('');
+
+        } catch (err) {
+            console.error("Error setting password:", err);
+            const message = err.response?.data?.message || "Failed to set password.";
+            toast.error(message);
+        } finally {
+            setIsSettingPassword(false);
+        }
+    };
+
     const getRoleBadgeVariant = (role) => {
         switch (role) {
             case 'admin': return 'destructive';
@@ -225,6 +292,18 @@ const UserListPage = () => {
             case 'pro': return 'success'; // Use success for Pro (ensure success color exists)
             default: return 'secondary';
         }
+    };
+
+    // Helper function to get device count for a user
+    const getUserDeviceCount = (userId) => {
+        const userDeviceData = deviceUsage?.userBreakdown?.find(u => u.userId === userId);
+        return userDeviceData?.deviceCount || 0;
+    };
+
+    // Helper function to get plan limits
+    const getPlanLimit = (plan) => {
+        const limits = { Free: 1, Basic: 3, Pro: 5 };
+        return limits[plan] || 1;
     };
 
     if (isLoading) {
@@ -243,13 +322,22 @@ const UserListPage = () => {
     }
 
     // Allowed plans for selection
-    const allowedPlans = ['Free', 'Basic', 'Pro']; // Adjust with your plans
+    const allowedPlans = [
+        { value: 'Free', label: 'Free (1 Device)' },
+        { value: 'Basic', label: 'Basic (3 Devices)' },
+        { value: 'Pro', label: 'Pro (5 Devices)' }
+    ];
 
     const refreshUsers = async () => {
         if (loggedInUser?.role === 'admin') {
             try {
                 const { data } = await api.get('/admin/users');
                 setUsers(data);
+                
+                // Also refresh device usage
+                fetchDeviceUsage();
+                
+                toast.success('User list and device usage refreshed successfully.');
             } catch (err) {
                 toast.error('Failed to refresh user list.');
             }
@@ -263,6 +351,42 @@ const UserListPage = () => {
                 <RefreshButton onRefresh={refreshUsers} position="relative" />
             </div>
 
+            {/* Server Device Usage Stats */}
+            {deviceUsage && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
+                        <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Server Capacity</div>
+                        <div className="text-2xl font-bold">{deviceUsage.serverStats.connectedDevices}/{deviceUsage.serverStats.serverLimit}</div>
+                        <div className="text-xs text-gray-500">devices connected</div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
+                        <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Utilization</div>
+                        <div className="text-2xl font-bold">{deviceUsage.serverStats.utilizationPercentage}%</div>
+                        <div className="text-xs text-gray-500">server usage</div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
+                        <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Available</div>
+                        <div className="text-2xl font-bold">{deviceUsage.serverStats.availableSlots}</div>
+                        <div className="text-xs text-gray-500">slots remaining</div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
+                        <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</div>
+                        <div className="text-2xl font-bold">
+                            <Badge 
+                                variant={
+                                    deviceUsage.serverStats.status === 'FULL' ? 'destructive' :
+                                    deviceUsage.serverStats.status === 'NEAR_FULL' ? 'default' : 
+                                    'success'
+                                }
+                            >
+                                {deviceUsage.serverStats.status}
+                            </Badge>
+                        </div>
+                        <div className="text-xs text-gray-500">server status</div>
+                    </div>
+                </div>
+            )}
+
             <Table>
                 <TableHeader>
                     <TableRow>
@@ -270,6 +394,7 @@ const UserListPage = () => {
                         <TableHead>Email</TableHead> {/* Translate table header */}
                         <TableHead>Role</TableHead> {/* Translate table header */}
                         <TableHead>Plan</TableHead> {/* Translate table header */}
+                        <TableHead>Devices</TableHead> {/* New column for device usage */}
                         <TableHead>Registration Date</TableHead> {/* Translate table header */}
                         <TableHead className="text-right">Actions</TableHead> {/* Translate table header */}
                     </TableRow>
@@ -285,6 +410,34 @@ const UserListPage = () => {
                                 </TableCell>
                                 <TableCell>
                                     <Badge variant={getPlanBadgeVariant(u.membershipPlan)}>{u.membershipPlan || 'N/A'}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                    {/* Device usage display */}
+                                    {isLoadingDeviceUsage ? (
+                                        <span className="text-sm text-gray-500">Loading...</span>
+                                    ) : (
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-medium">
+                                                {getUserDeviceCount(u._id)}/{getPlanLimit(u.membershipPlan)}
+                                            </span>
+                                            <Badge 
+                                                variant={
+                                                    getUserDeviceCount(u._id) >= getPlanLimit(u.membershipPlan) 
+                                                        ? 'destructive' 
+                                                        : getUserDeviceCount(u._id) > 0 
+                                                            ? 'default' 
+                                                            : 'outline'
+                                                }
+                                                className="text-xs"
+                                            >
+                                                {getUserDeviceCount(u._id) >= getPlanLimit(u.membershipPlan) 
+                                                    ? 'Full' 
+                                                    : getUserDeviceCount(u._id) > 0 
+                                                        ? 'Active' 
+                                                        : 'None'}
+                                            </Badge>
+                                        </div>
+                                    )}
                                 </TableCell>
                                 <TableCell>
                                     {/* Tambah semakan untuk u.createdAt sebelum format */}
@@ -328,7 +481,7 @@ const UserListPage = () => {
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             {allowedPlans.map(plan => (
-                                                                <SelectItem key={plan} value={plan}>{plan}</SelectItem>
+                                                                <SelectItem key={plan.value} value={plan.value}>{plan.label}</SelectItem>
                                                             ))}
                                                         </SelectContent>
                                                     </Select>
@@ -385,6 +538,63 @@ const UserListPage = () => {
                                        </AlertDialog>
                                    )}
 
+                                   {/* Password Reset Button */}
+                                   <Dialog open={isPasswordDialogOpen && userForPasswordReset?._id === u._id} onOpenChange={(isOpen) => {
+                                        if (!isOpen) {
+                                            setIsPasswordDialogOpen(false);
+                                            setUserForPasswordReset(null);
+                                            setNewPassword('');
+                                        }
+                                    }}>
+                                        <DialogTrigger asChild>
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                onClick={() => handleOpenPasswordDialog(u)}
+                                                disabled={loggedInUser._id === u._id} // Cannot reset own password
+                                            >
+                                                <Key className="h-4 w-4 mr-1" /> Set Password
+                                            </Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="sm:max-w-[425px]">
+                                            <DialogHeader>
+                                                <DialogTitle>Set New Password</DialogTitle>
+                                                <DialogDescription>
+                                                    Set a new password for {userForPasswordReset?.name}.
+                                                </DialogDescription>
+                                            </DialogHeader>
+                                            <div className="grid gap-4 py-4">
+                                                <div className="grid grid-cols-4 items-center gap-4">
+                                                    <Label htmlFor="password-input" className="text-right">Password</Label>
+                                                    <Input 
+                                                        id="password-input"
+                                                        type="password"
+                                                        value={newPassword}
+                                                        onChange={(e) => setNewPassword(e.target.value)}
+                                                        placeholder="Enter new password"
+                                                        className="col-span-3"
+                                                        disabled={isSettingPassword}
+                                                        minLength={6}
+                                                    />
+                                                </div>
+                                                <div className="text-sm text-muted-foreground ml-auto col-span-4">
+                                                    Password must be at least 6 characters long.
+                                                </div>
+                                            </div>
+                                            <DialogFooter>
+                                                <DialogClose>
+                                                    <Button type="button" variant="secondary" disabled={isSettingPassword}>Cancel</Button>
+                                                </DialogClose>
+                                                <Button 
+                                                    onClick={handleSetNewPassword} 
+                                                    disabled={isSettingPassword || !newPassword.trim() || newPassword.length < 6}
+                                                >
+                                                    {isSettingPassword ? 'Setting...' : 'Set Password'}
+                                                </Button>
+                                            </DialogFooter>
+                                        </DialogContent>
+                                    </Dialog>
+
                                    {/* BARU: Delete User Button & AlertDialog */}
                                    <AlertDialog open={isDeleteDialogOpen && userForDeletion?._id === u._id} onOpenChange={(isOpen) => {
                                         if (!isOpen) {
@@ -420,7 +630,7 @@ const UserListPage = () => {
                         ))
                     ) : (
                         <TableRow>
-                            <TableCell colSpan={6} className="h-24 text-center">No users found.</TableCell> {/* Translate text */}
+                            <TableCell colSpan={7} className="h-24 text-center">No users found.</TableCell> {/* Translate text */}
                         </TableRow>
                     )}
                 </TableBody>

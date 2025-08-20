@@ -23,13 +23,39 @@ function LoginPage() {
     setLoading(true);
 
     try {
-      const { data } = await api.post('/users/login', { email, password });
-      login(data, data.accessToken, data.refreshToken);
-      // Redirect handled by AuthProvider/MainLayout
+      const { data } = await api.post('/auth/login', { email, password });
+      
+      // Handle new response format
+      if (data.success) {
+        login(data.user, data.accessToken, data.refreshToken);
+        // Redirect handled by AuthProvider/MainLayout
+      } else {
+        setError(data.message || 'Login failed. Please try again.');
+      }
     } catch (err) {
-      setError(
-        err.response?.data?.message || 'Failed to log in. Please try again.'
-      );
+      // Handle specific error messages from backend
+      const errorResponse = err.response?.data;
+      let errorMessage = 'Failed to log in. Please try again.';
+      
+      if (errorResponse?.message) {
+        errorMessage = errorResponse.message;
+      } else if (errorResponse?.errorType) {
+        switch (errorResponse.errorType) {
+          case 'EMAIL_NOT_FOUND':
+            errorMessage = 'This email is not registered yet. Please sign up first.';
+            break;
+          case 'WRONG_PASSWORD':
+            errorMessage = 'Incorrect password. Please try again.';
+            break;
+          case 'SERVER_ERROR':
+            errorMessage = 'Server error occurred. Please try again later.';
+            break;
+          default:
+            errorMessage = 'Login failed. Please check your credentials.';
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

@@ -8,6 +8,7 @@ const Message = require('../models/Message.js')
 const pino = require('pino')
 
 const PLAN_LIMITS = { Free: 1, Basic: 2, Pro: 5, default: 1 }
+const SERVER_DEVICE_LIMIT = parseInt(process.env.SERVER_DEVICE_LIMIT) || 150; // Total device limit for this server
 
 // Helper function to process incoming messages
 const processIncomingMessage = async (userId, msg) => {
@@ -181,7 +182,19 @@ async function connectToWhatsApp(userId) {
 
   // --- SEMAKAN HAD SAMBUNGAN DAHULU ---
   try {
-    console.log(`[Baileys] Connect request received for user ${userId}. Checking plan limits...`);
+    console.log(`[Baileys] Connect request received for user ${userId}. Checking server and plan limits...`);
+    
+    // STEP 1: Check server-wide device limit FIRST
+    const serverActiveDevicesCount = await WhatsappDevice.countDocuments({ connectionStatus: 'connected' });
+    console.log(`[Baileys] Server-wide devices: ${serverActiveDevicesCount}/${SERVER_DEVICE_LIMIT}`);
+    
+    if (serverActiveDevicesCount >= SERVER_DEVICE_LIMIT) {
+      console.warn(`[Baileys] SERVER DEVICE LIMIT REACHED! ${serverActiveDevicesCount}/${SERVER_DEVICE_LIMIT} devices connected.`);
+      emit(userId, 'whatsapp_error', `Server is at maximum capacity (${SERVER_DEVICE_LIMIT} devices). Please try again later.`);
+      return;
+    }
+    
+    // STEP 2: Check user plan limits
     const user = await User.findById(userId);
     if (!user) {
       console.error(`[Baileys] User not found for ID: ${userId}`);
@@ -192,11 +205,11 @@ async function connectToWhatsApp(userId) {
     limit = PLAN_LIMITS[userPlan] || PLAN_LIMITS.default; // Assign ke variable luar
     currentActiveDevicesCount = await WhatsappDevice.countDocuments({ userId, connectionStatus: 'connected' }); // Assign ke variable luar
 
-    console.log(`[Baileys] User ${userId}: Plan=${userPlan}, Limit=${limit}, CurrentActiveInDB=${currentActiveDevicesCount}`);
+    console.log(`[Baileys] User ${userId}: Plan=${userPlan}, Limit=${limit}, CurrentActiveInDB=${currentActiveDevicesCount}, ServerTotal=${serverActiveDevicesCount}`);
 
     if (currentActiveDevicesCount >= limit) {
-      console.warn(`[Baileys] Connection limit reached for user ${userId}. Limit: ${limit}.`);
-      emit(userId, 'whatsapp_error', `Connection limit (${limit}) reached. Please disconnect an existing device to add a new one.`);
+      console.warn(`[Baileys] User connection limit reached for user ${userId}. Limit: ${limit}.`);
+      emit(userId, 'whatsapp_error', `Your plan allows maximum ${limit} device(s). Please disconnect an existing device to add a new one.`);
       const existingDevice = await WhatsappDevice.findOne({ userId, connectionStatus: 'connected' });
       if (existingDevice) {
           emit(userId, 'whatsapp_status', 'connected');

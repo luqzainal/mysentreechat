@@ -14,6 +14,54 @@ router.post('/bulk', protect, sendBulkMessage);
 router.get('/chat/:phoneNumber', protect, getChatHistory);
 router.post('/send', protect, sendMessage);
 
+// Admin endpoint untuk server device monitoring
+router.get('/server/device-usage', protect, async (req, res) => {
+    try {
+        const SERVER_DEVICE_LIMIT = parseInt(process.env.SERVER_DEVICE_LIMIT) || 150; // Same as in baileysService
+        
+        // Get server-wide device statistics
+        const totalDevices = await WhatsappDevice.countDocuments();
+        const connectedDevices = await WhatsappDevice.countDocuments({ connectionStatus: 'connected' });
+        const disconnectedDevices = await WhatsappDevice.countDocuments({ connectionStatus: 'disconnected' });
+        const availableSlots = SERVER_DEVICE_LIMIT - connectedDevices;
+        
+        // Get user breakdown
+        const userBreakdown = await WhatsappDevice.aggregate([
+            { $match: { connectionStatus: 'connected' } },
+            { $group: { _id: '$userId', deviceCount: { $sum: 1 } } },
+            { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+            { $unwind: '$user' },
+            { $project: { userId: '$_id', email: '$user.email', plan: '$user.membershipPlan', deviceCount: 1 } },
+            { $sort: { deviceCount: -1 } }
+        ]);
+        
+        const serverStats = {
+            serverLimit: SERVER_DEVICE_LIMIT,
+            totalDevices,
+            connectedDevices,
+            disconnectedDevices,
+            availableSlots,
+            utilizationPercentage: Math.round((connectedDevices / SERVER_DEVICE_LIMIT) * 100),
+            status: connectedDevices >= SERVER_DEVICE_LIMIT ? 'FULL' : connectedDevices >= (SERVER_DEVICE_LIMIT * 0.9) ? 'NEAR_FULL' : 'AVAILABLE'
+        };
+        
+        res.json({
+            success: true,
+            serverStats,
+            userBreakdown,
+            timestamp: new Date()
+        });
+        
+    } catch (error) {
+        console.error('[Server Device Usage] Error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to get server device usage',
+            message: error.message 
+        });
+    }
+});
+
 // Debug endpoint untuk check AI campaigns
 router.get('/debug/ai-campaigns', protect, async (req, res) => {
     try {

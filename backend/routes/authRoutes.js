@@ -34,25 +34,51 @@ router.post('/register', async (req, res) => {
         if (user) {
             const tokens = generateTokens(user._id);
             res.status(201).json({
-                _id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                plan: user.plan,
+                success: true,
+                message: 'User registered successfully',
+                user: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    membershipPlan: user.membershipPlan,
+                    createdAt: user.createdAt
+                },
                 accessToken: tokens.accessToken,
                 refreshToken: tokens.refreshToken,
             });
         } else {
-            res.status(400).json({ message: 'Invalid user data' });
+            res.status(400).json({ 
+                success: false,
+                message: 'Invalid user data' 
+            });
         }
     } catch (error) {
         console.error('Error during registration:', error);
          // Handle validation errors from Mongoose
          if (error.name === 'ValidationError') {
              const messages = Object.values(error.errors).map(val => val.message);
-             return res.status(400).json({ message: messages.join('. ') });
+             return res.status(400).json({ 
+                success: false,
+                message: messages.join('. '),
+                errorType: 'VALIDATION_ERROR'
+             });
          }
-        res.status(500).json({ message: 'Server Error' });
+         
+         // Handle duplicate key errors (email already exists)
+         if (error.code === 11000) {
+             return res.status(400).json({ 
+                success: false,
+                message: 'This email is already registered. Please use a different email.',
+                errorType: 'EMAIL_ALREADY_EXISTS'
+             });
+         }
+         
+        res.status(500).json({ 
+            success: false,
+            message: 'Server error occurred during registration. Please try again later.',
+            errorType: 'SERVER_ERROR'
+        });
     }
 });
 
@@ -71,26 +97,48 @@ router.post('/login', async (req, res) => {
         // Cari pengguna berdasarkan email (termasuk password untuk perbandingan)
         const user = await User.findOne({ email }).select('+password');
 
-        // Semak jika pengguna wujud dan password sepadan
-        if (user && (await user.matchPassword(password))) {
-            // Jika sepadan, hantar data pengguna dan token
-            const tokens = generateTokens(user._id);
-            res.json({
+        // Check if user exists first
+        if (!user) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'This email is not registered yet. Please sign up first.',
+                errorType: 'EMAIL_NOT_FOUND'
+            });
+        }
+
+        // Check if password matches
+        const isPasswordMatch = await user.matchPassword(password);
+        if (!isPasswordMatch) {
+            return res.status(401).json({ 
+                success: false,
+                message: 'Incorrect password. Please try again.',
+                errorType: 'WRONG_PASSWORD'
+            });
+        }
+
+        // If everything is correct, send user data and tokens
+        const tokens = generateTokens(user._id);
+        res.json({
+            success: true,
+            user: {
                 _id: user._id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                plan: user.plan,
-                accessToken: tokens.accessToken,
-                refreshToken: tokens.refreshToken,
-            });
-        } else {
-            // Jika tidak wujud atau password salah
-            res.status(401).json({ message: 'Invalid email or password' });
-        }
+                membershipPlan: user.membershipPlan,
+                createdAt: user.createdAt
+            },
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+        });
+
     } catch (error) {
         console.error('Error during login:', error);
-        res.status(500).json({ message: 'Server Error' });
+        res.status(500).json({ 
+            success: false,
+            message: 'Server error occurred. Please try again later.',
+            errorType: 'SERVER_ERROR'
+        });
     }
 });
 
@@ -100,15 +148,23 @@ router.post('/login', async (req, res) => {
 router.get('/me', protect, async (req, res) => {
     // Data pengguna (tanpa password) sudah ada dalam req.user dari middleware protect
      if (req.user) {
+         // Get fresh user data from database to ensure latest plan info
+         const freshUser = await User.findById(req.user._id);
+         
          // Boleh tambah data lain jika perlu, cth: settings
         // const settings = await Setting.findOne({ userId: req.user.id });
          res.json({
-             _id: req.user._id,
-             name: req.user.name,
-             email: req.user.email,
-             role: req.user.role,
-             plan: req.user.plan,
-             // settings: settings // contoh
+             success: true,
+             user: {
+                 _id: freshUser._id,
+                 name: freshUser.name,
+                 email: freshUser.email,
+                 role: freshUser.role,
+                 membershipPlan: freshUser.membershipPlan,
+                 createdAt: freshUser.createdAt,
+                 updatedAt: freshUser.updatedAt
+                 // settings: settings // contoh
+             }
          });
      } else {
          res.status(404).json({ message: 'User not found' }); // Sepatutnya tidak berlaku jika protect berjaya

@@ -30,7 +30,7 @@ const planLimits = {
 // const currentUserPlan = 'Basic'; // Ini mungkin patut datang dari user.membershipPlan
 
 function ScanDevicePage() {
-  const { user } = useAuth();
+  const { user, refreshUserData } = useAuth();
   const [rawQrString, setRawQrString] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [socketConnected, setSocketConnected] = useState(false);
@@ -91,6 +91,21 @@ function ScanDevicePage() {
   useEffect(() => {
       fetchDevices();
   }, [fetchDevices]);
+
+  // Auto-refresh user data when window gets focus (to get latest plan changes)
+  useEffect(() => {
+      const handleWindowFocus = async () => {
+          try {
+              await refreshUserData();
+              console.log("[ScanDevicePage] User data refreshed on window focus");
+          } catch (error) {
+              console.error("[ScanDevicePage] Failed to refresh user data:", error);
+          }
+      };
+
+      window.addEventListener('focus', handleWindowFocus);
+      return () => window.removeEventListener('focus', handleWindowFocus);
+  }, [refreshUserData]);
 
   // Logik socket
   const connectSocket = useCallback(() => {
@@ -327,7 +342,13 @@ function ScanDevicePage() {
     <div className="container mx-auto p-4 space-y-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Scan Device</h1>
-        <RefreshButton onRefresh={fetchDevices} position="relative" />
+        <RefreshButton onRefresh={async () => {
+          // Refresh both device list and user data
+          await Promise.all([
+            fetchDevices(),
+            refreshUserData().catch(err => console.error("Failed to refresh user data:", err))
+          ]);
+        }} position="relative" />
       </div>
 
       {/* Kad untuk Imbas QR & Status Semasa */}
