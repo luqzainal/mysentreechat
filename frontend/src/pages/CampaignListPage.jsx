@@ -126,6 +126,7 @@ function CampaignListPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
+                      <TableHead>Flow ID</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Features</TableHead>
                       <TableHead>Last Edited</TableHead>
@@ -136,6 +137,11 @@ function CampaignListPage() {
                     {campaigns.map((campaign) => (
                       <TableRow key={campaign._id} className={isUpdating === campaign._id ? 'opacity-50' : ''}>
                         <TableCell className="font-medium">{campaign.name}</TableCell>
+                        <TableCell>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
+                            {campaign.flowId || 'N/A'}
+                          </code>
+                        </TableCell>
                         <TableCell>
                            <Badge variant={campaign.status === 'Enabled' ? 'success' : 'destructive'}>
                                {campaign.status}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom'; // Import hooks
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -69,6 +69,7 @@ function AddCampaignPage() {
   const [selectedMediaItems, setSelectedMediaItems] = useState([]);
   const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [tempSelectedMediaInDialog, setTempSelectedMediaInDialog] = useState([]);
+  const [isApiConfigModalOpen, setIsApiConfigModalOpen] = useState(false);
   
   const [scheduledAt, setScheduledAt] = useState('');
   const [minInterval, setMinInterval] = useState('5');
@@ -102,8 +103,7 @@ function AddCampaignPage() {
     nextBotAction: '',
     presenceDelayTime: '',
     presenceDelayStatus: 'disable',
-    saveData: 'no_save_response',
-    apiRestDataStatus: 'disabled',
+    appointmentLink: '',
     mediaFileAi: null, // Untuk fail media AI chatbot
     selectedMediaFromLibrary: null, // Untuk media dari library
     captionAi: '',
@@ -113,27 +113,21 @@ function AddCampaignPage() {
     conversationMode: 'single_response', // 'single_response' or 'continuous_chat'
     maxConversationBubbles: '3',
     endConversationKeywords: '',
-    bubbleOptions: [
-      { id: 1, text: '', active: true },
-      { id: 2, text: '', active: false },
-      { id: 3, text: '', active: false },
-      { id: 4, text: '', active: false },
-      { id: 5, text: '', active: false }
-    ],
-    // API Rest Data Configuration
+    // API Rest Configuration
     apiRestConfig: {
       webhookUrl: '',
       method: 'POST',
-      headers: {},
       customHeaders: '',
       sendCustomerData: true,
       sendResponseData: true,
       sendTimestamp: true
-    }
+    },
+    // Temporary input field for keywords
+    keywordInput: ''
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [isApiConfigModalOpen, setIsApiConfigModalOpen] = useState(false);
+  const [aiUsageStatus, setAiUsageStatus] = useState({ hasAiCampaign: false, canCreateAi: true, aiCampaign: null });
 
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -189,11 +183,22 @@ function AddCampaignPage() {
     const fetchData = async () => {
       if (!user) return;
       try {
-        const [devResponse, groupsResponse, mediaResponse] = await Promise.all([
+        const apiCalls = [
           api.get('/whatsapp/devices'),
           determinedCampaignType === 'bulk' ? api.get('/contact-groups') : Promise.resolve({ data: [] }),
-          determinedCampaignType === 'bulk' ? api.get('/media') : Promise.resolve({ data: [] }),
-        ]);
+          // Fetch media for both bulk AND ai_chatbot campaigns (ai_chatbot also needs media library)
+          (determinedCampaignType === 'bulk' || determinedCampaignType === 'ai_chatbot') ? api.get('/media') : Promise.resolve({ data: [] }),
+        ];
+        
+        // Add AI usage check for AI chatbot campaigns
+        if (determinedCampaignType === 'ai_chatbot') {
+          apiCalls.push(api.get(`/ai-chatbot/check-ai-usage/${user.id}`).catch(error => {
+            console.error('[AddCampaignPage] Error fetching AI usage status:', error);
+            return { data: { hasAiCampaign: false, canCreateAi: true, aiCampaign: null } }; // Fallback data
+          }));
+        }
+        
+        const [devResponse, groupsResponse, mediaResponse, aiUsageResponse] = await Promise.all(apiCalls);
 
         const fetchedDevices = devResponse.data || [];
         console.log('[AddCampaignPage] Fetched devices:', fetchedDevices);
@@ -202,6 +207,7 @@ function AddCampaignPage() {
         console.log('[AddCampaignPage] Selected device ID before:', selectedDeviceId);
         
         setDevicesList(fetchedDevices);
+        
         if(determinedCampaignType === 'bulk') {
           // Map contact groups to match frontend expectations
           console.log('[AddCampaignPage] Raw contact groups from API:', groupsResponse.data);
@@ -214,6 +220,16 @@ function AddCampaignPage() {
           console.log('[AddCampaignPage] Mapped contact groups:', mappedContactGroups);
           setContactGroupsList(mappedContactGroups);
           setUserMediaList(mediaResponse.data || []);
+        } else if (determinedCampaignType === 'ai_chatbot') {
+          // Set media list for AI chatbot (needed for media library selection)
+          setUserMediaList(mediaResponse.data || []);
+          console.log('[AddCampaignPage] AI chatbot media list loaded:', mediaResponse.data?.length || 0);
+          
+          // Set AI usage status if response exists
+          if (aiUsageResponse) {
+            setAiUsageStatus(aiUsageResponse.data);
+            console.log('[AddCampaignPage] AI usage status:', aiUsageResponse.data);
+          }
         }
         
         if (currentDeviceIdFromPath) {
@@ -263,8 +279,7 @@ function AddCampaignPage() {
                 nextBotAction: campaignData.nextBotAction || '',
                 presenceDelayTime: campaignData.presenceDelayTime || '',
                 presenceDelayStatus: campaignData.presenceDelayStatus || 'disable',
-                saveData: campaignData.saveData || 'no_save_response',
-                apiRestDataStatus: campaignData.apiRestDataStatus || 'disabled',
+                appointmentLink: campaignData.appointmentLink || '',
                 mediaFileAi: null, // Fail akan diuruskan berasingan, tidak dihantar dalam data ini
                 captionAi: campaignData.captionAi || '',
                 useAiFeature: campaignData.useAiFeature || 'not_use_ai',
@@ -273,40 +288,56 @@ function AddCampaignPage() {
                 conversationMode: campaignData.conversationMode || 'single_response',
                 maxConversationBubbles: campaignData.maxConversationBubbles || '3',
                 endConversationKeywords: campaignData.endConversationKeywords || '',
-                bubbleOptions: (() => {
-                  // Start with default 5 bubbles
-                  const defaultBubbles = [
-                    { id: 1, text: '', active: true },
-                    { id: 2, text: '', active: false },
-                    { id: 3, text: '', active: false },
-                    { id: 4, text: '', active: false },
-                    { id: 5, text: '', active: false }
-                  ];
-                  
-                  // If campaign has saved bubbles, merge them with defaults
-                  if (Array.isArray(campaignData.bubbleOptions) && campaignData.bubbleOptions.length > 0) {
-                    campaignData.bubbleOptions.forEach(savedBubble => {
-                      const index = savedBubble.id - 1;
-                      if (index >= 0 && index < 5) {
-                        defaultBubbles[index] = savedBubble;
-                      }
-                    });
-                  }
-                  
-                  return defaultBubbles;
-                })(),
-                // API Rest Data Configuration
+                // API Rest Configuration
                 apiRestConfig: campaignData.apiRestConfig || {
                   webhookUrl: '',
                   method: 'POST',
-                  headers: {},
                   customHeaders: '',
                   sendCustomerData: true,
                   sendResponseData: true,
                   sendTimestamp: true
                 }
               });
-              // TODO: Handle media untuk AI Chatbot edit mode jika ada (e.g. panggil API media khusus)
+              
+              // Handle media untuk AI Chatbot edit mode
+              console.log('[AddCampaign] AI Chatbot media debug:', {
+                mediaAttachments: campaignData.mediaAttachments,
+                userMediaListLength: userMediaList.length,
+                mediaAttachmentsLength: campaignData.mediaAttachments ? campaignData.mediaAttachments.length : 0
+              });
+              
+              if (campaignData.mediaAttachments && campaignData.mediaAttachments.length > 0 && userMediaList.length > 0) {
+                console.log('[AddCampaign] Processing AI Chatbot media attachments:', {
+                  campaignMediaAttachments: campaignData.mediaAttachments,
+                  userMediaListIds: userMediaList.map(m => m._id),
+                  userMediaList: userMediaList
+                });
+                
+                // Find the selected media from library
+                const selectedMedia = userMediaList.find(media => 
+                  campaignData.mediaAttachments.includes(media._id)
+                );
+                
+                if (selectedMedia) {
+                  console.log('[AddCampaign] Found selected media for AI Chatbot:', {
+                    selectedMedia: selectedMedia,
+                    selectedMediaId: selectedMedia._id,
+                    selectedMediaName: selectedMedia.originalName || selectedMedia.fileName
+                  });
+                  setAiChatbotFormData(prev => ({
+                    ...prev,
+                    selectedMediaFromLibrary: selectedMedia,
+                    mediaFileAi: null // Clear file upload since we're using library media
+                  }));
+                } else {
+                  console.log('[AddCampaign] No matching media found in user media list for AI Chatbot:', {
+                    lookingFor: campaignData.mediaAttachments,
+                    availableIds: userMediaList.map(m => m._id)
+                  });
+                }
+              } else {
+                console.log('[AddCampaign] No AI Chatbot media to process or userMediaList not available yet');
+              }
             } else { // Untuk bulk campaign
               setFormData({
                   campaignName: campaignData.campaignName || '',
@@ -328,16 +359,41 @@ function AddCampaignPage() {
               setCampaignScheduleType(campaignData.campaignScheduleType || 'anytime');
               let scheduleDetails = [];
               if (typeof campaignData.campaignScheduleDetails === 'string') {
-                  try { scheduleDetails = JSON.parse(campaignData.campaignScheduleDetails); } catch (e) { scheduleDetails = []; }
+                  try { scheduleDetails = JSON.parse(campaignData.campaignScheduleDetails); } catch { scheduleDetails = []; }
               } else if (Array.isArray(campaignData.campaignScheduleDetails)) {
                   scheduleDetails = campaignData.campaignScheduleDetails;
               }
               setDefinedHours(scheduleDetails);
-              if (campaignData.mediaAttachments && campaignData.mediaAttachments.length > 0 && userMediaList.length > 0) {
+              console.log('[AddCampaign] Campaign media debug:', {
+                campaignId: editCampaignId,
+                mediaAttachments: campaignData.mediaAttachments,
+                userMediaListLength: userMediaList.length,
+                campaignData: campaignData
+              });
+              
+              if (campaignData.mediaAttachments && campaignData.mediaAttachments.length > 0) {
+                  console.log('[AddCampaign] Processing media attachments:', campaignData.mediaAttachments);
                   const populatedMedia = campaignData.mediaAttachments
-                  .map(attachmentId => userMediaList.find(media => media._id === attachmentId))
+                  .map(attachment => {
+                    // Handle both populated objects and IDs
+                    if (typeof attachment === 'object' && attachment._id) {
+                      // Already populated object from backend
+                      console.log('[AddCampaign] Using populated media object:', attachment.originalName);
+                      return attachment;
+                    } else {
+                      // Just an ID, need to find in userMediaList
+                      const attachmentId = attachment;
+                      console.log('[AddCampaign] Looking for media ID:', attachmentId);
+                      const found = userMediaList.find(media => media._id === attachmentId);
+                      console.log('[AddCampaign] Found media:', found);
+                      return found;
+                    }
+                  })
                   .filter(item => !!item);
+                  console.log('[AddCampaign] Final populated media:', populatedMedia);
                   setSelectedMediaItems(populatedMedia);
+              } else {
+                console.log('[AddCampaign] No media to process - conditions not met');
               }
             }
             toast.success("Campaign details loaded.");
@@ -354,7 +410,100 @@ function AddCampaignPage() {
       }
     };
     if(user) fetchData(); // Hanya fetch jika user sudah ada
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search, location.pathname, user, deviceIdFromParams, isEditMode, editCampaignId, determinedCampaignType]);
+
+  // Separate effect to handle media selection for AI chatbot after userMediaList is loaded
+  // Modified to handle media reloading properly
+  useEffect(() => {
+    if (determinedCampaignType === 'ai_chatbot' && isEditMode && editCampaignId && userMediaList.length > 0) {
+      
+      console.log('[AddCampaign] useEffect triggered for AI chatbot media loading (modified)');
+      
+      // Re-fetch campaign data to get media attachments
+      const loadAiChatbotMedia = async () => {
+        try {
+          const campaignApiUrl = `/ai-chatbot/${selectedDeviceId}/campaigns/${editCampaignId}`;
+          const campResponse = await api.get(campaignApiUrl);
+          const campaignData = campResponse.data;
+          
+          console.log('[AddCampaign] Re-fetching AI chatbot campaign for media (modified):', {
+            mediaAttachments: campaignData.mediaAttachments,
+            userMediaListLength: userMediaList.length,
+            userMediaListIds: userMediaList.map(m => m._id),
+            currentSelectedMedia: aiChatbotFormData.selectedMediaFromLibrary,
+            currentSelectedMediaId: aiChatbotFormData.selectedMediaFromLibrary?._id
+          });
+          
+          if (campaignData.mediaAttachments && campaignData.mediaAttachments.length > 0) {
+            // Handle both populated objects and IDs
+            let selectedMedia;
+            const firstAttachment = campaignData.mediaAttachments[0];
+            
+            if (typeof firstAttachment === 'object' && firstAttachment._id) {
+              // Already populated object from backend
+              selectedMedia = firstAttachment;
+            } else {
+              // Just an ID, find in userMediaList
+              selectedMedia = userMediaList.find(media => 
+                campaignData.mediaAttachments.includes(media._id)
+              );
+            }
+            
+            if (selectedMedia) {
+              // Only update if current selectedMediaFromLibrary is different or null
+              const currentSelectedId = aiChatbotFormData.selectedMediaFromLibrary?._id;
+              const newSelectedId = selectedMedia._id;
+              
+              if (currentSelectedId !== newSelectedId) {
+                console.log('[AddCampaign] Setting selected media from effect (updated):', {
+                  selectedMedia: selectedMedia,
+                  selectedMediaId: selectedMedia._id,
+                  selectedMediaName: selectedMedia.originalName || selectedMedia.fileName,
+                  previousSelectedId: currentSelectedId,
+                  updating: true
+                });
+                setAiChatbotFormData(prev => ({
+                  ...prev,
+                  selectedMediaFromLibrary: selectedMedia,
+                  mediaFileAi: null
+                }));
+              } else {
+                console.log('[AddCampaign] Media already correctly selected, no update needed');
+              }
+            } else {
+              console.log('[AddCampaign] Secondary effect - No matching media found:', {
+                lookingFor: campaignData.mediaAttachments,
+                availableIds: userMediaList.map(m => m._id)
+              });
+              // Clear selection if media not found
+              if (aiChatbotFormData.selectedMediaFromLibrary) {
+                setAiChatbotFormData(prev => ({
+                  ...prev,
+                  selectedMediaFromLibrary: null,
+                  mediaFileAi: null
+                }));
+              }
+            }
+          } else {
+            // No media attachments - clear selection
+            console.log('[AddCampaign] No media attachments, clearing selection');
+            if (aiChatbotFormData.selectedMediaFromLibrary) {
+              setAiChatbotFormData(prev => ({
+                ...prev,
+                selectedMediaFromLibrary: null,
+                mediaFileAi: null
+              }));
+            }
+          }
+        } catch (error) {
+          console.error('[AddCampaign] Error loading AI chatbot media in effect:', error);
+        }
+      };
+      
+      loadAiChatbotMedia();
+    }
+  }, [determinedCampaignType, isEditMode, editCampaignId, userMediaList, selectedDeviceId]);
 
   useEffect(() => {
     let hours = [];
@@ -374,10 +523,6 @@ function AddCampaignPage() {
     targetForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
-  const handleSwitchChange = (checked, name) => {
-    const targetForm = determinedCampaignType === 'ai_chatbot' ? setAiChatbotFormData : setFormData;
-    targetForm(prev => ({ ...prev, [name]: checked }));
-  };
   
   const handleRadioChange = (value, name) => {
     // Hanya untuk AI Chatbot pada masa ini
@@ -423,12 +568,39 @@ function AddCampaignPage() {
   };
 
   const handleConfirmMediaSelection = () => {
+    console.log('[handleConfirmMediaSelection] Campaign type:', determinedCampaignType);
+    console.log('[handleConfirmMediaSelection] tempSelectedMediaInDialog:', tempSelectedMediaInDialog);
+    
     if (determinedCampaignType === 'ai_chatbot') {
       // Untuk AI chatbot: simpan media dalam aiChatbotFormData dan clear file upload
       if (tempSelectedMediaInDialog.length > 0) {
         const selectedMedia = tempSelectedMediaInDialog[0];
-        setAiChatbotFormData(prev => ({ ...prev, selectedMediaFromLibrary: selectedMedia, mediaFileAi: null }));
-        if (aiMediaFileInputRef.current) { aiMediaFileInputRef.current.value = ""; }
+        console.log('[handleConfirmMediaSelection] AI Chatbot - setting selectedMedia:', {
+          selectedMedia,
+          id: selectedMedia._id,
+          name: selectedMedia.originalName || selectedMedia.fileName
+        });
+        
+        // Update state with selected media
+        setAiChatbotFormData(prev => ({ 
+          ...prev, 
+          selectedMediaFromLibrary: { ...selectedMedia }, // Create new object to force re-render
+          mediaFileAi: null 
+        }));
+        
+        console.log('[handleConfirmMediaSelection] AI Chatbot - state updated with media:', selectedMedia.originalName || selectedMedia.fileName);
+        
+        // Clear file input
+        if (aiMediaFileInputRef.current) { 
+          aiMediaFileInputRef.current.value = ""; 
+        }
+      } else {
+        console.log('[handleConfirmMediaSelection] AI Chatbot - no media selected, clearing selection');
+        setAiChatbotFormData(prev => ({ 
+          ...prev, 
+          selectedMediaFromLibrary: null, 
+          mediaFileAi: null 
+        }));
       }
     } else {
       // Untuk bulk campaign: logik asal
@@ -444,11 +616,29 @@ function AddCampaignPage() {
   const handleCancelMediaSelection = () => setIsMediaLibraryOpen(false);
   const openMediaLibrary = () => { setTempSelectedMediaInDialog([...selectedMediaItems]); setIsMediaLibraryOpen(true); };
   
-  // Fungsi untuk API Rest Data Configuration
-  const handleOpenApiConfig = () => {
-    setIsApiConfigModalOpen(true);
+  // Fungsi untuk buka Media Library modal
+  const handleOpenMediaStorage = () => {
+    console.log('[handleOpenMediaStorage] Opening media library for campaign type:', determinedCampaignType);
+    
+    if (determinedCampaignType === 'ai_chatbot') {
+      // For AI chatbot: initialize with selectedMediaFromLibrary if exists
+      const currentlySelected = aiChatbotFormData.selectedMediaFromLibrary ? [aiChatbotFormData.selectedMediaFromLibrary] : [];
+      console.log('[handleOpenMediaStorage] AI Chatbot - initializing with:', {
+        selectedMediaFromLibrary: aiChatbotFormData.selectedMediaFromLibrary,
+        currentlySelected: currentlySelected,
+        selectedMediaId: aiChatbotFormData.selectedMediaFromLibrary?._id,
+        selectedMediaName: aiChatbotFormData.selectedMediaFromLibrary?.originalName || aiChatbotFormData.selectedMediaFromLibrary?.fileName
+      });
+      setTempSelectedMediaInDialog(currentlySelected);
+    } else {
+      // For bulk: initialize with selectedMediaItems
+      console.log('[handleOpenMediaStorage] Bulk campaign - initializing with selectedMediaItems:', selectedMediaItems);
+      setTempSelectedMediaInDialog([...selectedMediaItems]);
+    }
+    setIsMediaLibraryOpen(true);
   };
 
+  // Fungsi untuk mengendalikan perubahan konfigurasi API
   const handleApiConfigChange = (field, value) => {
     setAiChatbotFormData(prev => ({
       ...prev,
@@ -459,65 +649,17 @@ function AddCampaignPage() {
     }));
   };
 
+  // Fungsi untuk menyimpan konfigurasi API
   const handleSaveApiConfig = () => {
-    // Process custom headers
-    let processedHeaders = {};
-    if (aiChatbotFormData.apiRestConfig.customHeaders) {
-      try {
-        const headerLines = aiChatbotFormData.apiRestConfig.customHeaders.split('\n');
-        headerLines.forEach(line => {
-          const [key, value] = line.split(':').map(item => item.trim());
-          if (key && value) {
-            processedHeaders[key] = value;
-          }
-        });
-      } catch (error) {
-        console.warn('Error parsing custom headers:', error);
-      }
+    // Validasi asas
+    if (!aiChatbotFormData.apiRestConfig.webhookUrl) {
+      toast.error("Webhook URL is required");
+      return;
     }
     
-    setAiChatbotFormData(prev => ({
-      ...prev,
-      apiRestConfig: {
-        ...prev.apiRestConfig,
-        headers: processedHeaders
-      }
-    }));
-    
+    // Tutup modal
     setIsApiConfigModalOpen(false);
-    toast.success('API configuration saved!');
-  };
-
-  // Bubble Options Handlers
-  const handleBubbleTextChange = (bubbleId, text) => {
-    setAiChatbotFormData(prev => ({
-      ...prev,
-      bubbleOptions: (prev.bubbleOptions || []).map(bubble =>
-        bubble.id === bubbleId ? { ...bubble, text } : bubble
-      )
-    }));
-  };
-
-  const handleBubbleToggle = (bubbleId) => {
-    setAiChatbotFormData(prev => ({
-      ...prev,
-      bubbleOptions: (prev.bubbleOptions || []).map(bubble =>
-        bubble.id === bubbleId ? { ...bubble, active: !bubble.active } : bubble
-      )
-    }));
-  };
-
-  const getActiveBubbles = () => {
-    if (!aiChatbotFormData.bubbleOptions || !Array.isArray(aiChatbotFormData.bubbleOptions)) {
-      return [];
-    }
-    return aiChatbotFormData.bubbleOptions.filter(bubble => bubble.active && bubble.text.trim());
-  };
-  
-  // Fungsi untuk buka Media Library modal
-  const handleOpenMediaStorage = () => {
-    setTempSelectedMediaInDialog([]);
-    setIsMediaLibraryOpen(true);
+    toast.success("API configuration saved");
   };
 
   const handleSubmit = async (e) => {
@@ -558,8 +700,7 @@ function AddCampaignPage() {
             'nextBotAction': 'nextBotAction',
             'presenceDelayTime': 'presenceDelayTime',
             'presenceDelayStatus': 'presenceDelayStatus',
-            'saveData': 'saveData',
-            'apiRestDataStatus': 'apiRestDataStatus',
+            'appointmentLink': 'appointmentLink',
             'captionAi': 'captionAi',
             'useAiFeature': 'useAiFeature',
             'aiSpintax': 'aiSpintax',
@@ -569,24 +710,27 @@ function AddCampaignPage() {
             'endConversationKeywords': 'endConversationKeywords'
         };
 
+        console.log('[Form Submit] AI Chatbot Form Data:', aiChatbotFormData);
+        console.log('[Form Submit] selectedMediaFromLibrary:', aiChatbotFormData.selectedMediaFromLibrary);
+        
         Object.keys(aiChatbotFormData).forEach(key => {
             if (key === 'mediaFileAi' && aiChatbotFormData[key]) {
+                console.log('[Form Submit] Adding mediaFileAi:', aiChatbotFormData[key]);
                 dataPayload.append('mediaFileAi', aiChatbotFormData[key]);
             } else if (key === 'selectedMediaFromLibrary' && aiChatbotFormData[key]) {
                 // Hantar ID media dari library untuk backend guna
+                console.log('[Form Submit] Adding selectedMediaLibraryId:', aiChatbotFormData[key]._id);
                 dataPayload.append('selectedMediaLibraryId', aiChatbotFormData[key]._id);
             } else if (key === 'apiRestConfig') {
-                // Handle API Rest configuration
+                // Hantar konfigurasi API sebagai JSON string
                 dataPayload.append('apiRestConfig', JSON.stringify(aiChatbotFormData[key]));
-            } else if (key === 'bubbleOptions') {
-                // Handle bubble options - only send bubbles with text content
-                const validBubbles = (aiChatbotFormData[key] || []).filter(bubble => 
-                    bubble.text && bubble.text.trim().length > 0
-                );
-                dataPayload.append('bubbleOptions', JSON.stringify(validBubbles));
+            } else if (key === 'keywords' && aiChatbotFormData[key]) {
+                // Special handling for keywords - ensure it's sent as a string for backend processing
+                console.log('[Form Submit] Keywords before sending:', aiChatbotFormData[key]);
+                dataPayload.append('keywords', aiChatbotFormData[key]);
             } else if (fieldMapping[key]) {
                 dataPayload.append(fieldMapping[key], aiChatbotFormData[key]);
-            } else if (key !== 'mediaFileAi' && key !== 'selectedMediaFromLibrary' && key !== 'apiRestConfig' && key !== 'bubbleOptions') {
+            } else if (key !== 'mediaFileAi' && key !== 'selectedMediaFromLibrary' && key !== 'apiRestConfig' && key !== 'keywordInput') {
                 dataPayload.append(key, aiChatbotFormData[key]);
             }
         });
@@ -738,7 +882,7 @@ function AddCampaignPage() {
                 <div className="space-y-2">
                 <Label htmlFor="deviceSelect">Device {determinedCampaignType === 'bulk' && <span className="text-red-500">*</span>}</Label>
                 {/* Debug info */}
-                {process.env.NODE_ENV === 'development' && (
+                {import.meta.env.DEV && (
                   <div className="text-xs text-gray-500 p-2 bg-gray-100 rounded">
                     <strong>Debug Info:</strong><br/>
                     Campaign Type: {determinedCampaignType}<br/>
@@ -801,7 +945,7 @@ function AddCampaignPage() {
 
         {/* ======================== BULK CAMPAIGN FORM START ======================== */}
         {/* Debug info for bulk campaign form visibility */}
-        {process.env.NODE_ENV === 'development' && determinedCampaignType === 'bulk' && (
+        {import.meta.env.DEV && determinedCampaignType === 'bulk' && (
           <div className="text-xs text-blue-600 p-2 bg-blue-50 rounded border">
             <strong>Bulk Campaign Form Debug:</strong><br/>
             Campaign Type: {determinedCampaignType}<br/>
@@ -842,7 +986,7 @@ function AddCampaignPage() {
                                     }));
                                     setContactGroupsList(mappedContactGroups);
                                     toast.success('Contact groups refreshed');
-                                } catch (error) {
+                                } catch {
                                     toast.error('Failed to refresh contact groups');
                                 }
                             }}
@@ -853,16 +997,22 @@ function AddCampaignPage() {
                     <Select onValueChange={setSelectedContactGroupId} value={selectedContactGroupId} required>
                         <SelectTrigger id="contactGroupId">
                         <SelectValue placeholder="Select contact group...">
-                            {selectedContactGroupId && contactGroupsList.length > 0 ? 
+                            {selectedContactGroupId ? 
                                 (() => {
+                                    if (selectedContactGroupId === 'all_contacts') {
+                                        return '📧 All Contacts (Send to all contacts)';
+                                    }
                                     const selectedGroup = contactGroupsList.find(group => group._id === selectedContactGroupId);
-                                    return selectedGroup ? `${selectedGroup.name} (${selectedGroup.count} contacts)` : 'Select contact group...';
+                                    return selectedGroup ? `👥 ${selectedGroup.name} (${selectedGroup.count} contacts)` : 'Select contact group...';
                                 })()
                                 : 'Select contact group...'
                             }
                         </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
+                        {/* Option untuk semua kontak */}
+                        <SelectItem value="all_contacts">📧 All Contacts (Send to all contacts)</SelectItem>
+                        
                         {contactGroupsList.length === 0 && (
                           <div className="p-2 text-sm text-muted-foreground space-y-2">
                             <p>No contact groups found.</p>
@@ -896,7 +1046,7 @@ function AddCampaignPage() {
                           </div>
                         )}
                         {contactGroupsList.map(group => (
-                            <SelectItem key={group._id} value={group._id}>{group.name} ({group.count} contacts)</SelectItem>
+                            <SelectItem key={group._id} value={group._id}>👥 {group.name} ({group.count} contacts)</SelectItem>
                         ))}
                         </SelectContent>
                     </Select>
@@ -945,9 +1095,9 @@ function AddCampaignPage() {
                     <CardContent className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                             <div className="space-y-1">
-                                <Label htmlFor="scheduledAt">Time Post (Optional)</Label>
+                                <Label htmlFor="scheduledAt">Time Post (Required)</Label>
                                 <Input type="datetime-local" id="scheduledAt" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
-                                <p className="text-xs text-muted-foreground">Leave blank to send immediately (if queue is empty).</p>
+                                {/* <p className="text-xs text-muted-foreground">Leave blank to send immediately (if queue is empty).</p> */}
                             </div>
                             <div className="space-y-1">
                                 <Label htmlFor="minInterval">Min Interval (secs)</Label>
@@ -1026,13 +1176,17 @@ function AddCampaignPage() {
                 </RadioGroup>
                 </div>
 
-                {/* is not Match default response? */}
+                {/* Default response when no keyword match */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-isNotMatchDefaultResponse">is not Match default response?</Label>
+                <Label htmlFor="ai-isNotMatchDefaultResponse">Use AI for unmatched messages?</Label>
                 <RadioGroup id="ai-isNotMatchDefaultResponse" name="isNotMatchDefaultResponse" value={aiChatbotFormData.isNotMatchDefaultResponse} onValueChange={(value) => handleRadioChange(value, 'isNotMatchDefaultResponse')} className="flex space-x-4">
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="no" id="ai-isNotMatchDefaultResponse-no" /><Label htmlFor="ai-isNotMatchDefaultResponse-no">No</Label></div>
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="yes" id="ai-isNotMatchDefaultResponse-yes" /><Label htmlFor="ai-isNotMatchDefaultResponse-yes">Yes</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="yes" id="ai-isNotMatchDefaultResponse-yes" /><Label htmlFor="ai-isNotMatchDefaultResponse-yes">Yes - Use AI prompt for unmatched messages</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="no" id="ai-isNotMatchDefaultResponse-no" /><Label htmlFor="ai-isNotMatchDefaultResponse-no">No - Use keyword/media response only</Label></div>
                 </RadioGroup>
+                <p className="text-xs text-muted-foreground">
+                  Yes: When customer sends message without keywords, AI will respond using your prompt.<br/>
+                  No: Bot will only respond when keywords are matched, sending media and caption.
+                </p>
                 </div>
 
                 {/* Send to */}
@@ -1078,6 +1232,13 @@ function AddCampaignPage() {
                 <div className="space-y-2">
                 <Label htmlFor="ai-name">Name <span className="text-red-500">*</span></Label>
                 <Input id="ai-name" name="name" value={aiChatbotFormData.name} onChange={handleInputChange} placeholder="Enter response name, e.g., Salam Pembuka" required />
+                {isEditMode && editCampaignId && (
+                  <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
+                    <Label className="text-xs text-blue-600 font-semibold">Flow ID:</Label>
+                    <p className="text-sm text-blue-800 font-mono">{editCampaignId}</p>
+                    <p className="text-xs text-blue-600 mt-1">This is the unique identifier for this campaign flow.</p>
+                  </div>
+                )}
                 </div>
 
                 {/* Description */}
@@ -1089,31 +1250,109 @@ function AddCampaignPage() {
                 {/* Keywords */}
                 <div className="space-y-2">
                 <Label htmlFor="ai-keywords">
-                  Keywords {aiChatbotFormData.type === 'message_contains_ai' ? '(Optional - For Initial Trigger)' : '(Required)'}
+                  Keywords {(aiChatbotFormData.type === 'message_contains_ai' || aiChatbotFormData.isNotMatchDefaultResponse === 'no') ? '(Optional)' : '(Required)'}
                 </Label>
-                <Textarea 
-                  id="ai-keywords" 
-                  name="keywords" 
-                  value={aiChatbotFormData.keywords} 
-                  onChange={handleInputChange} 
-                  placeholder={
-                    aiChatbotFormData.type === 'message_contains_ai' 
-                      ? "Optional: Enter keywords to start conversation. e.g., hai,help,info (leave empty to respond to ANY first message)"
-                      : "Enter keywords, separated by comma. e.g., hai,helo,info produk"
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  {aiChatbotFormData.type === 'message_contains_ai' 
-                    ? 'In continuous chat mode: Keywords are optional. If set, conversation starts when customer sends these words. If empty, bot responds to any first message.'
-                    : 'Bot will trigger if message contains any of these keywords.'
-                  }
-                </p>
+                <div className="space-y-2">
+                  {/* Keywords Input Field */}
+                  <Input 
+                    id="ai-keywords" 
+                    name="keywordInput" 
+                    value={aiChatbotFormData.keywordInput || ''}
+                    onChange={(e) => {
+                      setAiChatbotFormData(prev => ({ ...prev, keywordInput: e.target.value }));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        const currentValue = aiChatbotFormData.keywordInput?.trim();
+                        if (currentValue) {
+                          const existingKeywords = aiChatbotFormData.keywords 
+                            ? aiChatbotFormData.keywords.split(',').map(k => k.trim()).filter(k => k)
+                            : [];
+                          
+                          // Check if keyword already exists
+                          if (!existingKeywords.includes(currentValue)) {
+                            const newKeywords = existingKeywords.length > 0 
+                              ? [...existingKeywords, currentValue].join(', ')
+                              : currentValue;
+                            setAiChatbotFormData(prev => ({ 
+                              ...prev, 
+                              keywords: newKeywords,
+                              keywordInput: '' 
+                            }));
+                          } else {
+                            // Clear input if keyword already exists
+                            setAiChatbotFormData(prev => ({ ...prev, keywordInput: '' }));
+                          }
+                        }
+                      }
+                    }}
+                    placeholder={
+                      aiChatbotFormData.isNotMatchDefaultResponse === 'no'
+                        ? "Type keywords and press space to add..."
+                        : aiChatbotFormData.type === 'message_contains_ai' 
+                          ? "Type keywords and press space to add (or leave empty)"
+                          : "Type keywords and press space to add..."
+                    }
+                  />
+                  
+                  {/* Interactive Keywords Bubbles */}
+                  {aiChatbotFormData.keywords && aiChatbotFormData.keywords.trim() && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {aiChatbotFormData.keywords
+                        .split(',')
+                        .map(keyword => keyword.trim())
+                        .filter(keyword => keyword)
+                        .map((keyword, index) => (
+                          <div
+                            key={index}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white text-sm rounded-full hover:bg-blue-600 transition-all duration-200 shadow-sm hover:shadow-md"
+                          >
+                            <span className="font-medium">{keyword}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updatedKeywords = aiChatbotFormData.keywords
+                                  .split(',')
+                                  .map(k => k.trim())
+                                  .filter(k => k && k !== keyword)
+                                  .join(', ');
+                                setAiChatbotFormData(prev => ({ ...prev, keywords: updatedKeywords }));
+                              }}
+                              className="ml-1 w-4 h-4 rounded-full bg-blue-600 hover:bg-red-500 text-white text-xs font-bold flex items-center justify-center transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                              title={`Remove keyword: ${keyword}`}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <p className="font-medium text-blue-600">💡 How to Use:</p>
+                  <ul className="list-disc list-inside pl-2 space-y-1">
+                    <li>Type keywords in the input box above</li>
+                    <li>Press <kbd className="px-1 py-0.5 bg-gray-100 rounded text-xs">Space</kbd> or <kbd className="px-1 py-0.5 bg-gray-100 rounded text-xs">Enter</kbd> to add bubble</li>
+                    <li>Click <span className="inline-flex items-center justify-center w-3 h-3 bg-gray-400 text-white rounded-full text-xs">×</span> button to remove keywords</li>
+                  </ul>
+                  <p className="mt-2">
+                    {aiChatbotFormData.isNotMatchDefaultResponse === 'no'
+                      ? 'When these keywords are matched, bot will send media and caption only (not AI response).'
+                      : aiChatbotFormData.type === 'message_contains_ai' 
+                        ? 'In continuous chat mode: Keywords are optional. If set, conversation starts when customer sends these words.'
+                        : 'Bot will trigger if message contains any of these keywords.'
+                    }
+                  </p>
+                </div>
                 </div>
 
                 {/* Next Bot Action */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-nextBotAction">Next Bot Action (Optional)</Label>
-                <Input id="ai-nextBotAction" name="nextBotAction" value={aiChatbotFormData.nextBotAction} onChange={handleInputChange} placeholder="Enter ID of next AI Chatbot item if needed" />
+                <Label htmlFor="ai-nextBotAction">Next Bot Action (Flow ID)</Label>
+                <Input id="ai-nextBotAction" name="nextBotAction" value={aiChatbotFormData.nextBotAction} onChange={handleInputChange} placeholder="Enter Flow ID of next campaign (e.g., FLOW-20250818-123456-0001)" />
+                <p className="text-xs text-muted-foreground">Optional: Enter the Flow ID of another campaign to chain responses together.</p>
                 </div>
                 
                 {/* Presence Delay */}
@@ -1133,34 +1372,22 @@ function AddCampaignPage() {
                 <p className="text-xs text-muted-foreground">Max: 25 seconds. Simulates user activity.</p>
                 </div>
 
-                {/* Save Data */}
+                {/* Appointment Link */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-saveData">Save Data</Label>
-                <RadioGroup id="ai-saveData" name="saveData" value={aiChatbotFormData.saveData} onValueChange={(value) => handleRadioChange(value, 'saveData')} className="flex space-x-4">
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="no_save_response" id="ai-saveData-no" /><Label htmlFor="ai-saveData-no">No save response</Label></div>
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="response_is_saved" id="ai-saveData-yes" /><Label htmlFor="ai-saveData-yes">The response is saved</Label></div>
-                </RadioGroup>
+                <Label htmlFor="ai-appointmentLink">Appointment Booking Link</Label>
+                <Input 
+                  id="ai-appointmentLink" 
+                  name="appointmentLink" 
+                  value={aiChatbotFormData.appointmentLink || ''} 
+                  onChange={handleInputChange} 
+                  placeholder="https://calendly.com/your-link or https://your-booking-system.com" 
+                  type="url"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional: When keywords are matched, customers will receive this booking link for appointments.
+                </p>
                 </div>
 
-                {/* API Rest Data */}
-                <div className="space-y-2">
-                <Label htmlFor="ai-apiRestDataStatus">API Rest Data</Label>
-                <div className="flex items-center space-x-4">
-                    <RadioGroup id="ai-apiRestDataStatus" name="apiRestDataStatus" value={aiChatbotFormData.apiRestDataStatus} onValueChange={(value) => handleRadioChange(value, 'apiRestDataStatus')} className="flex space-x-4">
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="disabled" id="ai-apiRestDataStatus-disabled" /><Label htmlFor="ai-apiRestDataStatus-disabled">Disabled</Label></div>
-                    <div className="flex items-center space-x-2"><RadioGroupItem value="enabled" id="ai-apiRestDataStatus-enabled" /><Label htmlFor="ai-apiRestDataStatus-enabled">Enabled</Label></div>
-                    </RadioGroup>
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      size="sm" 
-                      disabled={aiChatbotFormData.apiRestDataStatus === 'disabled'}
-                      onClick={handleOpenApiConfig}
-                    >
-                    <Settings2Icon className="mr-2 h-4 w-4" /> Configure API
-                    </Button>
-                </div>
-                </div>
                 
                 {/* Media file AI */}
                 <div className="space-y-2">
@@ -1168,12 +1395,24 @@ function AddCampaignPage() {
                 <div className="flex items-center space-x-2 border p-2 rounded-md">
                     <Input id="ai-mediaFileAi" type="file" onChange={handleAiMediaFileChange} className="hidden" ref={aiMediaFileInputRef} />
                     <Button type="button" variant="outline" onClick={() => aiMediaFileInputRef.current && aiMediaFileInputRef.current.click()} className="flex-grow justify-start text-muted-foreground">
-                        {aiChatbotFormData.mediaFileAi 
-                          ? aiChatbotFormData.mediaFileAi.name 
-                          : aiChatbotFormData.selectedMediaFromLibrary 
-                            ? aiChatbotFormData.selectedMediaFromLibrary.originalName || aiChatbotFormData.selectedMediaFromLibrary.fileName
-                            : "SELECT MEDIA FILE"
-                        }
+                        {(() => {
+                          console.log('[MediaButton] Rendering button text:', {
+                            mediaFileAi: aiChatbotFormData.mediaFileAi,
+                            selectedMediaFromLibrary: aiChatbotFormData.selectedMediaFromLibrary,
+                            selectedMediaName: aiChatbotFormData.selectedMediaFromLibrary?.originalName || aiChatbotFormData.selectedMediaFromLibrary?.fileName
+                          });
+                          
+                          if (aiChatbotFormData.mediaFileAi) {
+                            return aiChatbotFormData.mediaFileAi.name;
+                          } else if (aiChatbotFormData.selectedMediaFromLibrary) {
+                            const mediaName = aiChatbotFormData.selectedMediaFromLibrary.originalName || 
+                                           aiChatbotFormData.selectedMediaFromLibrary.fileName || 
+                                           'Selected Media';
+                            return mediaName;
+                          } else {
+                            return "SELECT MEDIA FILE";
+                          }
+                        })()}
                     </Button>
                     {/* Butang Media Storage */} 
                     <Button type="button" variant="ghost" size="icon" title="Open Media Library" onClick={handleOpenMediaStorage}><ImageIcon className="h-5 w-5" /></Button>
@@ -1192,15 +1431,9 @@ function AddCampaignPage() {
 
                 {/* Caption AI dengan Spintax */}
                 <div className="space-y-2">
-                <Label htmlFor="ai-captionAi">Caption / Text Message <span className="text-red-500">*</span></Label>
-                <Textarea id="ai-captionAi" name="captionAi" value={aiChatbotFormData.captionAi} onChange={handleInputChange} placeholder="Write message with Spintax support: {Hi|Hello|Hola}... Use [greet] [wa_name] [me_wa_name] [now_formatted|DD MMM YYYY]" rows={4} required />
+                <Label htmlFor="ai-captionAi">Caption / Text Message</Label>
+                <Textarea id="ai-captionAi" name="captionAi" value={aiChatbotFormData.captionAi} onChange={handleInputChange} placeholder="Write message with Spintax support: {Hi|Hello|Hola}... Use [greet] [wa_name] [me_wa_name] [now_formatted|DD MMM YYYY]" rows={4} />
                 <div className="flex space-x-1 mt-1">
-                    {/* Butang toolbar ini adalah placeholder visual. Implementasi sebenar memerlukan editor teks kaya atau logik JS. */}
-                    <Button type="button" variant="outline" size="icon" title="Bold (Not implemented)"><TypeIcon className="h-4 w-4" /></Button> 
-                    <Button type="button" variant="outline" size="icon" title="Image (Not implemented)"><ImageIcon className="h-4 w-4" /></Button>
-                    <Button type="button" variant="outline" size="icon" title="Emoji (Not implemented)"><SmileIcon className="h-4 w-4" /></Button>
-                    <Button type="button" variant="outline" size="icon" title="Settings (Not implemented)"><Settings2Icon className="h-4 w-4" /></Button>
-                    <Button type="button" variant="outline" size="icon" title="URL Shortener (Not implemented)"><Link2Icon className="h-4 w-4" /></Button>
                 </div>
                 <div className="mt-1 p-2 border rounded-md bg-muted text-xs text-muted-foreground">
                     <p className="font-semibold mb-1">Available Parameters:</p>
@@ -1218,8 +1451,30 @@ function AddCampaignPage() {
                 <Label htmlFor="ai-useAiFeature">Use AI for Dynamic Response</Label>
                 <RadioGroup id="ai-useAiFeature" name="useAiFeature" value={aiChatbotFormData.useAiFeature} onValueChange={(value) => handleRadioChange(value, 'useAiFeature')} className="flex space-x-4">
                     <div className="flex items-center space-x-2"><RadioGroupItem value="not_use_ai" id="ai-useAiFeature-no" /><Label htmlFor="ai-useAiFeature-no">Static Response</Label></div>
-                    <div className="flex items-center space-x-2 bg-gradient-to-r from-blue-50 to-purple-50 p-2 rounded-md border"><RadioGroupItem value="use_ai" id="ai-useAiFeature-yes" /><Label htmlFor="ai-useAiFeature-yes" className="font-medium text-blue-700">🤖 AI-Powered Response</Label></div>
+                    <div className={`flex items-center space-x-2 p-2 rounded-md border ${(!aiUsageStatus.canCreateAi && !isEditMode) ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'bg-gradient-to-r from-blue-50 to-purple-50'}`}>
+                      <RadioGroupItem 
+                        value="use_ai" 
+                        id="ai-useAiFeature-yes" 
+                        disabled={!aiUsageStatus.canCreateAi && !isEditMode}
+                      />
+                      <Label 
+                        htmlFor="ai-useAiFeature-yes" 
+                        className={`font-medium ${(!aiUsageStatus.canCreateAi && !isEditMode) ? 'text-gray-400' : 'text-blue-700'}`}
+                      >
+                        🤖 AI-Powered Response {(!aiUsageStatus.canCreateAi && !isEditMode) && '(Limited to 1 per account)'}
+                      </Label>
+                    </div>
                 </RadioGroup>
+                
+                {/* AI Usage Limitation Info */}
+                {!aiUsageStatus.canCreateAi && !isEditMode && aiUsageStatus.aiCampaign && (
+                  <div className="mt-2 p-3 border rounded-md bg-orange-50 text-xs text-orange-800">
+                    <p className="font-semibold mb-1">⚠️ AI Feature Limit:</p>
+                    <p>You already have an AI-powered campaign: <strong>"{aiUsageStatus.aiCampaign.name}"</strong></p>
+                    <p className="mt-1">Each account is limited to 1 AI-powered campaign. To use AI for this campaign, please disable your existing AI campaign first.</p>
+                  </div>
+                )}
+                
                 <div className="mt-1 p-2 border rounded-md bg-amber-50 text-xs text-amber-800">
                     <p className="font-semibold mb-1">ℹ️ Feature Comparison:</p>
                     <div className="grid grid-cols-2 gap-2">
@@ -1234,7 +1489,7 @@ function AddCampaignPage() {
                     </div>
                 </div>
                 {aiChatbotFormData.useAiFeature === 'use_ai' && (
-                    <div className="mt-2">
+                    <div className="mt-2 space-y-4">
                     <Label htmlFor="ai-prompt">AI Prompt for Dynamic Response <span className="text-red-500">*</span></Label>
                     <Textarea 
                       id="ai-prompt" 
@@ -1245,6 +1500,12 @@ function AddCampaignPage() {
                       rows={6}
                       required={aiChatbotFormData.useAiFeature === 'use_ai'}
                     />
+                    
+                    <div className="mt-1 p-2 border rounded-md bg-purple-50 text-xs text-purple-800 mb-2">
+                        <p className="font-semibold mb-1">ℹ️ AI Configuration:</p>
+                        <p>AI model, temperature, and other global settings are configured in <Link to="/settings" className="underline font-medium">Settings</Link>. This campaign will use your global AI preferences.</p>
+                    </div>
+                    
                     <div className="mt-1 p-2 border rounded-md bg-blue-50 text-xs text-blue-800">
                         <p className="font-semibold mb-1">AI Prompt Guidelines:</p>
                         <ul className="list-disc list-inside pl-4">
@@ -1261,14 +1522,15 @@ function AddCampaignPage() {
                         <ol className="list-decimal list-inside pl-4 mt-1">
                         <li>Read the customer's message</li>
                         <li>Use your prompt as instructions</li>
-                        <li>Generate a personalized response</li>
+                        <li>Generate a personalized response using your global AI settings</li>
                         <li>Send the response automatically</li>
                         </ol>
                     </div>
                     </div>
                 )}
 
-                {/* Conversation Flow & Bubble Options */}
+                {/* Conversation Flow & Bubble Options - Only show for AI-Powered response */}
+                {aiChatbotFormData.useAiFeature === 'use_ai' && (
                 <Card className="bg-blue-50 border-blue-200">
                   <CardHeader className="pb-4">
                     <CardTitle className="text-lg text-blue-800">💬 Conversation Flow Settings</CardTitle>
@@ -1379,59 +1641,10 @@ function AddCampaignPage() {
                       </div>
                     )}
 
-                    {/* Multiple Bubble Text Options */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label>Response Bubble Options</Label>
-                        <Badge variant="secondary">
-                          {getActiveBubbles().length}/5 active
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mb-3">
-                        Create multiple response options. AI will randomly select from active bubbles for variety.
-                      </p>
-                      
-                      <div className="space-y-3">
-                        {(aiChatbotFormData.bubbleOptions || []).map((bubble, index) => (
-                          <div key={bubble.id} className="flex items-start space-x-3 p-3 border rounded-md bg-white">
-                            <Checkbox
-                              checked={bubble.active}
-                              onCheckedChange={() => handleBubbleToggle(bubble.id)}
-                              className="mt-1"
-                            />
-                            <div className="flex-1 space-y-2">
-                              <Label className="text-sm font-medium">
-                                Bubble {index + 1} {bubble.active && bubble.text && '✓'}
-                              </Label>
-                              <Textarea
-                                placeholder={`Enter response text for bubble ${index + 1}...`}
-                                value={bubble.text}
-                                onChange={(e) => handleBubbleTextChange(bubble.id, e.target.value)}
-                                rows={2}
-                                disabled={!bubble.active}
-                                className={!bubble.active ? 'bg-gray-50' : ''}
-                              />
-                              {bubble.active && bubble.text && (
-                                <p className="text-xs text-green-600">
-                                  ✓ This bubble is active and will be used
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      {getActiveBubbles().length === 0 && (
-                        <div className="p-3 border border-orange-200 rounded-md bg-orange-50">
-                          <p className="text-sm text-orange-800">
-                            ⚠️ At least one bubble should be active and have text content.
-                          </p>
-                        </div>
-                      )}
-                    </div>
 
                   </CardContent>
                 </Card>
+                )}
 
                 </div>
             </CardContent>
@@ -1451,7 +1664,6 @@ function AddCampaignPage() {
                 isLoadingPageData || 
                 (determinedCampaignType === 'ai_chatbot' && !aiChatbotFormData.name) || 
                 (determinedCampaignType === 'ai_chatbot' && aiChatbotFormData.useAiFeature === 'use_ai' && !aiChatbotFormData.aiSpintax) ||
-                (determinedCampaignType === 'ai_chatbot' && getActiveBubbles().length === 0) ||
                 (determinedCampaignType === 'bulk' && !formData.campaignName)
               }
             >
@@ -1486,7 +1698,7 @@ function AddCampaignPage() {
                     >
                     <CardContent className="p-0 aspect-square flex flex-col items-center justify-center">
                         {media.fileType && media.fileType.startsWith('image/') ? (
-                            <img src={`${api.defaults.baseURL.replace('/api', '')}/uploads/${media.fileName}`} alt={media.fileName} className="object-contain h-full w-full rounded-t-md" onError={(e) => e.target.src = 'https://via.placeholder.com/150?text=No+Preview'}/>
+                            <img src={media.accessUrl || `${api.defaults.baseURL.replace('/api', '')}${media.filePath}`} alt={media.fileName} className="object-contain h-full w-full rounded-t-md" onError={(e) => e.target.src = 'https://via.placeholder.com/150?text=No+Preview'}/>
                         ) : media.fileType && media.fileType.startsWith('video/') ? (
                             <VideoIcon className="w-16 h-16 text-muted-foreground" /> 
                         ) : (

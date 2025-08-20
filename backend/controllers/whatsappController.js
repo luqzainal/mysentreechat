@@ -300,46 +300,67 @@ const executeBulkCampaign = async (req, res) => {
       });
     }
 
-    // Load contact group and contacts
-    let contactGroup = await ContactGroup.findOne({
-      _id: campaign.contactGroupId,
-      user: userId
-    }).populate('contacts');
-
-    if (!contactGroup) {
-      return res.status(400).json({ 
-        message: 'Contact group not found' 
-      });
-    }
-
-    // If contact group exists but has no contacts, try to auto-assign all user contacts
-    if (!contactGroup.contacts || contactGroup.contacts.length === 0) {
-      console.log(`[executeBulkCampaign] Contact group ${contactGroup.groupName} is empty. Auto-assigning all user contacts...`);
+    // Handle "all_contacts" special value or load specific contact group
+    let contactsToSend = [];
+    
+    if (campaign.contactGroupId === 'all_contacts') {
+      console.log(`[executeBulkCampaign] Using all contacts mode`);
       
-      // Get all user contacts
+      // Get all user contacts directly
       const allUserContacts = await Contact.find({ user: userId });
-      
       if (allUserContacts.length === 0) {
         return res.status(400).json({ 
           message: 'No contacts found. Please add contacts first.' 
         });
       }
-
-      // Add all contacts to the group
-      contactGroup.contacts = allUserContacts.map(contact => contact._id);
-      contactGroup.contactCount = allUserContacts.length;
-      await contactGroup.save();
       
-      // Reload with populated contacts
-      contactGroup = await ContactGroup.findOne({
+      contactsToSend = allUserContacts;
+      console.log(`[executeBulkCampaign] Found ${contactsToSend.length} total contacts for all contacts mode`);
+      
+    } else {
+      // Load specific contact group
+      let contactGroup = await ContactGroup.findOne({
         _id: campaign.contactGroupId,
         user: userId
       }).populate('contacts');
 
-      console.log(`[executeBulkCampaign] Auto-assigned ${allUserContacts.length} contacts to group ${contactGroup.groupName}`);
+      if (!contactGroup) {
+        return res.status(400).json({ 
+          message: 'Contact group not found' 
+        });
+      }
+
+      // If contact group exists but has no contacts, try to auto-assign all user contacts
+      if (!contactGroup.contacts || contactGroup.contacts.length === 0) {
+        console.log(`[executeBulkCampaign] Contact group ${contactGroup.groupName} is empty. Auto-assigning all user contacts...`);
+        
+        // Get all user contacts
+        const allUserContacts = await Contact.find({ user: userId });
+        
+        if (allUserContacts.length === 0) {
+          return res.status(400).json({ 
+            message: 'No contacts found. Please add contacts first.' 
+          });
+        }
+
+        // Add all contacts to the group
+        contactGroup.contacts = allUserContacts.map(contact => contact._id);
+        contactGroup.contactCount = allUserContacts.length;
+        await contactGroup.save();
+        
+        // Reload with populated contacts
+        contactGroup = await ContactGroup.findOne({
+          _id: campaign.contactGroupId,
+          user: userId
+        }).populate('contacts');
+
+        console.log(`[executeBulkCampaign] Auto-assigned ${allUserContacts.length} contacts to group ${contactGroup.groupName}`);
+      }
+      
+      contactsToSend = contactGroup.contacts;
     }
 
-    const contacts = contactGroup.contacts;
+    const contacts = contactsToSend;
     const minInterval = campaign.minIntervalSeconds || 5;
     const maxInterval = campaign.maxIntervalSeconds || 10;
 
@@ -362,38 +383,113 @@ const executeBulkCampaign = async (req, res) => {
         // Handle media attachments
         if (campaign.mediaAttachments && campaign.mediaAttachments.length > 0) {
           const mediaFile = campaign.mediaAttachments[0]; // Use first media for now
-          const fs = require('fs');
-          const path = require('path');
+          const s3Service = require('../services/s3Service.js');
           
-          const mediaPath = path.join(__dirname, '..', mediaFile.filePath);
+          console.log(`[WhatsApp] Processing media file: ${mediaFile.fileName}, type: ${mediaFile.fileType}, storage: ${mediaFile.storageType}`);
           
-          if (fs.existsSync(mediaPath)) {
-            if (mediaFile.fileType.startsWith('image/')) {
-              messageData = {
-                image: { url: mediaPath },
-                caption: messageContent
-              };
-            } else if (mediaFile.fileType.startsWith('video/')) {
-              messageData = {
-                video: { url: mediaPath },
-                caption: messageContent
-              };
-            } else if (mediaFile.fileType.startsWith('audio/')) {
-              messageData = {
-                audio: { url: mediaPath },
-                caption: messageContent
-              };
+          try {
+            // Get file info with proper URL (S3 or local)
+            const fileInfo = await s3Service.getFileInfo(mediaFile);
+            
+            console.log(`[WhatsApp] File info received:`, {
+              isS3: fileInfo.isS3,
+              accessUrl: fileInfo.accessUrl,
+              fileName: mediaFile.fileName
+            });
+            
+            if (fileInfo.isS3) {
+              // For S3 files, download the file first, then send as buffer
+              // Baileys works better with buffers than URLs for media
+              console.log(`[WhatsApp] Downloading S3 file: ${mediaFile.fileName}`);
+              
+              const https = require('https');
+              const http = require('http');
+              const url = require('url');
+              
+              const downloadBuffer = await new Promise((resolve, reject) => {
+                const parsedUrl = url.parse(fileInfo.accessUrl);
+                const client = parsedUrl.protocol === 'https:' ? https : http;
+                
+                client.get(fileInfo.accessUrl, (response) => {
+                  if (response.statusCode !== 200) {
+                    return reject(new Error(`Failed to download: ${response.statusCode}`));
+                  }
+                  
+                  const chunks = [];
+                  response.on('data', (chunk) => chunks.push(chunk));
+                  response.on('end', () => resolve(Buffer.concat(chunks)));
+                }).on('error', reject);
+              });
+              
+              console.log(`[WhatsApp] Downloaded ${downloadBuffer.length} bytes from S3`);
+              
+              if (mediaFile.fileType.startsWith('image/')) {
+                messageData = {
+                  image: downloadBuffer,
+                  caption: messageContent
+                };
+              } else if (mediaFile.fileType.startsWith('video/')) {
+                messageData = {
+                  video: downloadBuffer,
+                  caption: messageContent
+                };
+              } else if (mediaFile.fileType.startsWith('audio/')) {
+                messageData = {
+                  audio: downloadBuffer,
+                  caption: messageContent
+                };
+              } else {
+                // Document/file
+                messageData = {
+                  document: downloadBuffer,
+                  mimetype: mediaFile.fileType,
+                  fileName: mediaFile.originalName,
+                  caption: messageContent
+                };
+              }
             } else {
-              // Document/file
-              messageData = {
-                document: { url: mediaPath },
-                mimetype: mediaFile.fileType,
-                fileName: mediaFile.originalName,
-                caption: messageContent
-              };
+              // For local files, read as Buffer
+              const fs = require('fs');
+              const path = require('path');
+              const localPath = path.join(__dirname, '..', mediaFile.filePath);
+              
+              console.log(`[WhatsApp] Reading local file as Buffer: ${localPath}`);
+              
+              if (fs.existsSync(localPath)) {
+                const mediaBuffer = fs.readFileSync(localPath);
+                console.log(`[WhatsApp] Read ${mediaBuffer.length} bytes from local file`);
+                
+                if (mediaFile.fileType.startsWith('image/')) {
+                  messageData = {
+                    image: mediaBuffer,
+                    caption: messageContent
+                  };
+                } else if (mediaFile.fileType.startsWith('video/')) {
+                  messageData = {
+                    video: mediaBuffer,
+                    caption: messageContent
+                  };
+                } else if (mediaFile.fileType.startsWith('audio/')) {
+                  messageData = {
+                    audio: mediaBuffer,
+                    caption: messageContent
+                  };
+                } else {
+                  // Document/file
+                  messageData = {
+                    document: mediaBuffer,
+                    mimetype: mediaFile.fileType,
+                    fileName: mediaFile.originalName,
+                    caption: messageContent
+                  };
+                }
+              } else {
+                throw new Error(`Local media file not found: ${localPath}`);
+              }
             }
-          } else {
-            console.warn(`Media file not found: ${mediaPath}, sending text only`);
+          } catch (error) {
+            console.error(`[WhatsApp] Error processing media file:`, error);
+            console.warn(`Media file processing failed, sending text only`);
             messageData = { text: messageContent };
           }
         } else {

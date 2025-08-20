@@ -4,6 +4,8 @@ const { protect } = require('../middleware/authMiddleware');
 const { uploadMediaAi } = require('../middleware/uploadMiddleware');
 const {
     getAiDeviceSummary,
+    checkAiUsage,
+    getAvailableFlows,
     updateAiDeviceStatus,
     getAiCampaigns,
     getAiCampaign,
@@ -19,6 +21,8 @@ const {
 
 // Device routes
 router.get('/devices-summary', protect, getAiDeviceSummary);
+router.get('/check-ai-usage/:userId', protect, checkAiUsage);
+router.get('/available-flows/:userId', protect, getAvailableFlows);
 router.put('/devices/:deviceId/status', protect, updateAiDeviceStatus);
 
 // Campaign routes

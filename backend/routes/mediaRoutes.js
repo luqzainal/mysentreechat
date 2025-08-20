@@ -3,7 +3,8 @@ const router = express.Router();
 const {
     getMediaList,
     uploadMedia,
-    deleteMedia
+    deleteMedia,
+    testS3Connection
 } = require('../controllers/mediaController.js');
 const { protect } = require('../middleware/authMiddleware.js');
 const { uploadMedia: uploadMiddleware } = require('../middleware/uploadMiddleware.js');
@@ -19,5 +20,8 @@ router.route('/')
 // Laluan untuk memadam fail media spesifik
 router.route('/:id')
     .delete(deleteMedia);
+
+// Test S3 connection endpoint
+router.get('/s3-test', testS3Connection);
 
 module.exports = router; 

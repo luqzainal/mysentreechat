@@ -21,21 +21,24 @@ class ConversationService {
             campaignId: campaignId,
             messageCount: 1,
             lastActivity: Date.now(),
-            startTime: Date.now()
+            startTime: Date.now(),
+            currentBubbleIndex: 0 // Track current position in flow
         });
         
         console.log(`[ConversationService] Started conversation for ${chatJid} with campaign ${campaignId}`);
     }
 
-    // Increment message count for conversation
+    // Increment message count for conversation and advance bubble index
     incrementMessageCount(userId, chatJid) {
         const userConversations = this.activeConversations.get(userId);
         if (userConversations && userConversations.has(chatJid)) {
             const conversation = userConversations.get(chatJid);
             conversation.messageCount++;
             conversation.lastActivity = Date.now();
+            // Advance to next bubble in flow for next response
+            conversation.currentBubbleIndex++;
             
-            console.log(`[ConversationService] Message count for ${chatJid}: ${conversation.messageCount}`);
+            console.log(`[ConversationService] Message count for ${chatJid}: ${conversation.messageCount}, bubble index: ${conversation.currentBubbleIndex}`);
             return conversation.messageCount;
         }
         return 0;
@@ -125,9 +128,9 @@ class ConversationService {
         return null;
     }
 
-    // Select random bubble option
-    selectRandomBubble(campaign) {
-        console.log(`[ConversationService] selectRandomBubble called`);
+    // Select bubble based on conversation flow sequence
+    selectFlowBubble(campaign, userId, chatJid) {
+        console.log(`[ConversationService] selectFlowBubble called for ${chatJid}`);
         console.log(`  Campaign bubbleOptions:`, JSON.stringify(campaign.bubbleOptions, null, 2));
         
         if (!campaign.bubbleOptions || campaign.bubbleOptions.length === 0) {
@@ -135,11 +138,14 @@ class ConversationService {
             return campaign.captionAi || 'Hello! How can I help you?';
         }
 
-        const activeBubbles = campaign.bubbleOptions.filter(bubble => {
-            const isValid = bubble.active && bubble.text && bubble.text.trim();
-            console.log(`  Bubble ${bubble.id}: active=${bubble.active}, text="${bubble.text}", valid=${isValid}`);
-            return isValid;
-        });
+        // Get active bubbles sorted by order
+        const activeBubbles = campaign.bubbleOptions
+            .filter(bubble => {
+                const isValid = bubble.active && bubble.text && bubble.text.trim();
+                console.log(`  Bubble ${bubble.id}: active=${bubble.active}, text="${bubble.text}", valid=${isValid}`);
+                return isValid;
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0)); // Sort by order field
         
         console.log(`[ConversationService] Found ${activeBubbles.length} active bubbles out of ${campaign.bubbleOptions.length} total`);
         
@@ -148,11 +154,41 @@ class ConversationService {
             return campaign.captionAi || 'Hello! How can I help you?';
         }
 
-        const randomIndex = Math.floor(Math.random() * activeBubbles.length);
-        const selectedBubble = activeBubbles[randomIndex];
+        // Get current bubble index from conversation
+        const userConversations = this.activeConversations.get(userId);
+        const conversation = userConversations?.get(chatJid);
+        const currentIndex = conversation?.currentBubbleIndex || 0;
         
-        console.log(`[ConversationService] Selected bubble ${selectedBubble.id} (index ${randomIndex}) from ${activeBubbles.length} active options: "${selectedBubble.text}"`);
+        // Select bubble based on flow position
+        let selectedBubble;
+        if (currentIndex < activeBubbles.length) {
+            selectedBubble = activeBubbles[currentIndex];
+            console.log(`[ConversationService] Selected flow bubble ${selectedBubble.id} (index ${currentIndex}): "${selectedBubble.text}"`);
+        } else {
+            // If we've exceeded available bubbles, cycle back or use last one
+            const lastIndex = activeBubbles.length - 1;
+            selectedBubble = activeBubbles[lastIndex];
+            console.log(`[ConversationService] Flow completed, using last bubble ${selectedBubble.id}: "${selectedBubble.text}"`);
+        }
+        
         return selectedBubble.text;
+    }
+
+    // Legacy method for backward compatibility (now calls selectFlowBubble)
+    selectRandomBubble(campaign, userId, chatJid) {
+        // For non-conversation flows, still use random selection
+        if (!userId || !chatJid) {
+            console.log(`[ConversationService] No conversation context, using random selection`);
+            const activeBubbles = campaign.bubbleOptions?.filter(bubble => bubble.active && bubble.text?.trim()) || [];
+            if (activeBubbles.length === 0) {
+                return campaign.captionAi || 'Hello! How can I help you?';
+            }
+            const randomIndex = Math.floor(Math.random() * activeBubbles.length);
+            return activeBubbles[randomIndex].text;
+        }
+        
+        // Use flow-based selection for conversations
+        return this.selectFlowBubble(campaign, userId, chatJid);
     }
 
     // Clean up old conversations

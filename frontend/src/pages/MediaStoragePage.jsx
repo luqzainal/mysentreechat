@@ -43,13 +43,26 @@ const MediaStoragePage = () => {
   const fileInputRef = useRef(null);
   const { user } = useAuth();
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'; // Dapatkan base URL API
+  // Backend base URL for media files (without /api path)
+  const BACKEND_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
+  console.log('[MediaStorage] Backend URL for media files:', BACKEND_URL);
 
   // Fetch senarai media
   const fetchMedia = async () => {
     setIsLoading(true);
     try {
       const response = await api.get('/media');
+      console.log('[MediaStorage] Fetched media list:', response.data);
+      // Debug each media item
+      response.data.forEach(media => {
+        console.log(`[MediaStorage] Media ${media._id}:`, {
+          fileName: media.fileName,
+          filePath: media.filePath,
+          accessUrl: media.accessUrl,
+          isS3: media.isS3,
+          storageType: media.storageType
+        });
+      });
       setMediaList(response.data);
     } catch (error) {
       console.error("Failed to get media list:", error);
@@ -209,19 +222,21 @@ const MediaStoragePage = () => {
                   <CardContent className="p-0 aspect-square flex items-center justify-center bg-muted">
                     {media.fileType.startsWith('image/') ? (
                       <img 
-                        src={`${API_URL}${media.filePath}`} 
+                        src={media.accessUrl || `${BACKEND_URL}${media.filePath}`}
                         alt={media.originalName}
                         className="object-cover w-full h-full"
-                        onError={(e) => { e.target.onerror = null; e.target.src="/placeholder.png"; }} // Fallback if image is broken
+                        onError={(e) => { 
+                          console.error(`[MediaStorage] Image load error for ${media.fileName}:`, e.target.src);
+                          e.target.onerror = null; 
+                          e.target.src="/placeholder.png"; 
+                        }} 
                       />
                     ) : media.fileType.startsWith('video/') ? (
                       <video 
-                        // src={`${API_URL}${media.filePath}`} 
-                        // controls 
                         className="object-cover w-full h-full bg-black flex items-center justify-center"
                         // Poster can be added if thumbnails are available
                       >
-                        <source src={`${API_URL}${media.filePath}`} type={media.fileType} />
+                        <source src={media.accessUrl || `${BACKEND_URL}${media.filePath}`} type={media.fileType} />
                         Your browser does not support the video tag.
                         {/* Video icon as fallback if video cannot play */} 
                          <Video className="h-16 w-16 text-white absolute" />
@@ -234,6 +249,9 @@ const MediaStoragePage = () => {
                         <div className="text-xs break-words">
                            <p className="font-semibold">{media.originalName}</p>
                            <p>{formatBytes(media.fileSize)}</p>
+                           <Badge variant={media.isS3 ? "secondary" : "outline"} className="w-fit mt-1">
+                             {media.isS3 ? "S3" : "Local"}
+                           </Badge>
                         </div>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>

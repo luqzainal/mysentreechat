@@ -39,6 +39,20 @@ const campaignSchema = new mongoose.Schema({
       message: 'Name is required and cannot be empty for AI chatbot campaigns'
     }
   },
+  // Unique flow ID for each campaign
+  flowId: {
+    type: String,
+    unique: true,
+    required: true,
+    default: function() {
+      // Generate unique flow ID: FLOW-YYYYMMDD-HHMMSS-XXXX (random 4 digits)
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0,10).replace(/-/g, '');
+      const timeStr = now.toTimeString().slice(0,8).replace(/:/g, '');
+      const randomStr = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      return `FLOW-${dateStr}-${timeStr}-${randomStr}`;
+    }
+  },
   campaignType: {
     type: String,
     enum: ['bulk', 'ai_chatbot'],
@@ -128,10 +142,23 @@ const campaignSchema = new mongoose.Schema({
     enum: ['disable', 'enable_typing', 'enable_recording'],
     default: 'disable'
   },
-  saveData: {
+  appointmentLink: {
     type: String,
-    enum: ['no_save_response', 'response_is_saved', 'save_to_database'],
-    default: 'no_save_response'
+    validate: {
+      validator: function(value) {
+        if (value && value.trim()) {
+          // Basic URL validation
+          try {
+            new URL(value);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+        return true; // Allow empty values
+      },
+      message: 'Please enter a valid URL for the appointment link'
+    }
   },
   apiRestDataStatus: {
     type: String,

@@ -32,6 +32,44 @@ const validateDeviceAccess = async (req, res, next) => {
   }
 };
 
+// Middleware untuk validasi deviceId tanpa memerlukan connection status (untuk delete operations)
+const validateDeviceAccessForDelete = async (req, res, next) => {
+  console.log('[validateDeviceAccessForDelete] Triggered. Path:', req.path, 'Original URL:', req.originalUrl);
+  const { deviceId } = req.params;
+  
+  if (!req.user || !req.user.id) {
+    console.error('[validateDeviceAccessForDelete] User not found on request.');
+    return res.status(401).json({ message: 'Not authorized, user information missing.' });
+  }
+  
+  console.log(`[validateDeviceAccessForDelete] Validating deviceId: ${deviceId} for user: ${req.user.id}`);
+  try {
+    // First try to find device with exact deviceId match
+    let device = await WhatsappDevice.findOne({ deviceId: deviceId, userId: req.user.id });
+    
+    if (!device) {
+      console.log(`[validateDeviceAccessForDelete] Exact deviceId ${deviceId} not found, trying fallback...`);
+      
+      // Fallback: Find any device for this user (for backward compatibility)
+      device = await WhatsappDevice.findOne({ userId: req.user.id });
+      
+      if (!device) {
+        console.log(`[validateDeviceAccessForDelete] No device found for user ${req.user.id}.`);
+        return res.status(404).json({ message: 'No device found for user' });
+      }
+      
+      console.log(`[validateDeviceAccessForDelete] Using fallback device ${device.deviceId} for user ${req.user.id}`);
+    }
+    
+    console.log(`[validateDeviceAccessForDelete] Device validated for deletion by user ${req.user.id}.`);
+    req.device = device;
+    next();
+  } catch (error) {
+    console.error('Error validating device access for delete:', error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
 // Semua route di bawah ini dilindungi
 router.use(protect); // Hanya protect digunakan secara global di sini
 
@@ -236,37 +274,103 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
 
             if (finalMediaAttachmentIds.length !== mediaIds.length) {
                 console.warn(`Beberapa ID media tidak sah atau bukan milik pengguna ${req.user.id}. Hanya ID yang sah akan digunakan.`);
-                // Jika fail turut dimuat naik, padamkannya kerana kita utamakan dari pustaka jika ada
-                if (req.file && req.file.path) {
-                    const fs = require('fs');
-                    fs.unlink(req.file.path, (err) => {
-                        if (err) console.error("Error deleting redundant uploaded file (library selection took precedence):", err);
-                    });
+                // Jika fail turut dimuat naik, ia akan diabaikan kerana kita utamakan dari pustaka jika ada
+                if (req.file && req.file.buffer) {
+                    console.log("File buffer ignored - library selection took precedence (memory storage)");
+                    // No need to delete file since it's memory storage
                 }
             }
         }
     } else if (req.file) {
       // Jika tiada mediaAttachments dari pustaka, tapi ada fail diupload, cipta rekod Media baru
       try {
-        const newMediaRecord = await Media.create({
+        console.log("Processing uploaded file for campaign creation (memory storage):", {
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+            hasBuffer: !!req.file.buffer
+        });
+
+        // Use S3 service for file upload (same logic as media controller)
+        const s3Service = require('../services/s3Service.js');
+        const mediaCompressionService = require('../services/mediaCompressionService.js');
+        
+        // Compress media if needed
+        let finalBuffer = req.file.buffer;
+        let finalMimeType = req.file.mimetype;
+        let finalFileName = req.file.originalname;
+        let compressionInfo = null;
+        
+        if (mediaCompressionService.needsCompression(req.file.buffer.length, req.file.mimetype)) {
+            console.log("File needs compression for campaign creation");
+            try {
+                const compressionResult = await mediaCompressionService.compressMedia(
+                    req.file.buffer, 
+                    req.file.mimetype, 
+                    req.file.originalname
+                );
+                
+                finalBuffer = compressionResult.buffer;
+                finalMimeType = compressionResult.mimeType;
+                finalFileName = compressionResult.fileName;
+                compressionInfo = {
+                    originalSize: compressionResult.originalSize,
+                    compressedSize: compressionResult.compressedSize,
+                    compressionRatio: compressionResult.compressionRatio,
+                    compressionApplied: compressionResult.compressionApplied
+                };
+                console.log("Compression completed for campaign creation:", compressionInfo);
+            } catch (compressionError) {
+                console.warn("Compression failed for campaign creation, using original file:", compressionError.message);
+            }
+        }
+
+        // Upload to S3
+        const uploadResult = await s3Service.uploadFile(
+            finalBuffer, 
+            finalFileName, 
+            finalMimeType, 
+            req.user.id.toString()
+        );
+        
+        if (!uploadResult.success) {
+            throw new Error('S3 upload failed');
+        }
+
+        console.log("S3 upload successful for campaign creation:", uploadResult.fileName);
+
+        // Create media record
+        const mediaData = {
             user: req.user.id,
             originalName: req.file.originalname,
-            fileName: req.file.filename, // Nama fail yang disimpan oleh Multer
-            filePath: `/uploads/media/${req.file.filename}`, // Path relatif
-            fileType: req.file.mimetype,
-            fileSize: req.file.size,
-        });
+            fileName: uploadResult.fileName,
+            filePath: uploadResult.filePath,
+            fileType: finalMimeType,
+            fileSize: uploadResult.fileSize,
+            storageType: uploadResult.storageType,
+            fileUrl: uploadResult.fileUrl
+        };
+
+        // Add compression info if available
+        if (compressionInfo) {
+            mediaData.compressionInfo = compressionInfo;
+        }
+
+        // Add S3 metadata
+        if (uploadResult.storageType === 's3' && uploadResult.metadata) {
+            mediaData.s3Metadata = {
+                bucket: uploadResult.metadata.bucket,
+                key: uploadResult.metadata.key,
+                eTag: uploadResult.metadata.eTag
+            };
+        }
+
+        const newMediaRecord = await Media.create(mediaData);
         finalMediaAttachmentIds.push(newMediaRecord._id);
-        console.log("New Media record created for uploaded file:", newMediaRecord._id);
+        console.log("New Media record created for campaign creation:", newMediaRecord._id);
       } catch (mediaCreationError) {
         console.error("Error creating Media record for uploaded file:", mediaCreationError);
-        // Jika gagal cipta rekod Media, padam fail yang telah dimuat naik
-        const fs = require('fs');
-        fs.unlink(req.file.path, (err) => {
-            if (err) console.error("Error deleting uploaded file after Media record creation failure:", err);
-        });
-        // Hantar ralat atau teruskan tanpa media?
-        // Untuk sekarang, kita hantar ralat kerana media dijangka ada jika fail diupload.
+        // No need to delete file since it's memory storage
         return res.status(500).json({ message: 'Failed to process uploaded media file.' });
       }
     }
@@ -281,20 +385,16 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
             newCampaignData.mediaPath = storedMedia.filePath;
             newCampaignData.mediaOriginalName = storedMedia.originalName;
             newCampaignData.mediaMimeType = storedMedia.fileType;
-            if (req.file && req.file.path) {
-                const fs = require('fs');
-                fs.unlink(req.file.path, (err) => {
-                    if (err) console.error("Error deleting redundant uploaded file when mediaId is used:", err);
-                    else console.log("Redundant uploaded file deleted as mediaId was provided.");
-                });
+            if (req.file && req.file.buffer) {
+                console.log("File buffer ignored when mediaId is used (memory storage)");
+                // No need to delete file since it's memory storage
             }
         } else {
             console.warn(`Media with ID ${mediaId} not found for user ${req.user.id}. Campaign will be created without media.`);
         }
     } else if (req.file) {
-      newCampaignData.mediaPath = `/uploads/media/${req.file.filename}`; 
-      newCampaignData.mediaOriginalName = req.file.originalname;
-      newCampaignData.mediaMimeType = req.file.mimetype;
+      // This old logic is replaced by the S3 upload logic above
+      console.warn("Old single media logic detected - this should not be reached");
     }
     */
 
@@ -303,17 +403,9 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
 
   } catch (error) {
     console.error('Error creating campaign:', error);
-    // Jika ralat berlaku selepas fail mungkin telah dimuat naik (dan belum diuruskan), padamkannya
-    if (req.file && req.file.path && !res.headersSent) { // Semak jika belum ada Media record dibuat untuknya
-        // Lebih selamat jika kita tahu Media record tidak sempat dibuat atau gagal.
-        // Jika Media record berjaya dibuat (dalam kes req.file), ia tidak perlu dipadam di sini.
-        // Logik pemadaman sudah ada dalam blok catch mediaCreationError.
-        // Jadi, di sini hanya jika ralat umum berlaku SEBELUM media diproses.
-        // Untuk lebih mudah, jika req.file ada dan ralat umum, kita boleh cuba padam.
-        const fs =require('fs');
-        fs.unlink(req.file.path, (err) => {
-            if (err) console.error("Error deleting uploaded file after failed campaign creation (general error):", err);
-        });
+    // For memory storage, no need to delete files on error
+    if (req.file && req.file.buffer && !res.headersSent) {
+        console.log("Campaign creation failed, file buffer will be garbage collected (memory storage)");
     }
     if (!res.headersSent) {
        res.status(500).json({ message: 'Server Error creating campaign' });
@@ -326,19 +418,29 @@ router.post('/:deviceId', validateDeviceAccess, uploadMedia, async (req, res) =>
 // @access  Private
 router.get('/:deviceId/:campaignId', validateDeviceAccess, async (req, res) => {
   try {
-    const campaign = await Campaign.findOne({ 
+    let campaign = await Campaign.findOne({ 
       _id: req.params.campaignId, 
       userId: req.user.id, 
       deviceId: req.params.deviceId 
     })
-    .populate('mediaAttachments')
-    .populate({
-      path: 'contactGroupId',
-      populate: {
-        path: 'contacts',
-        select: 'name phoneNumber'
-      }
-    });
+    .populate('mediaAttachments');
+
+    // Conditionally populate contactGroupId only if it's not "all_contacts"
+    if (campaign && campaign.contactGroupId && campaign.contactGroupId !== 'all_contacts') {
+      campaign = await Campaign.findOne({ 
+        _id: req.params.campaignId, 
+        userId: req.user.id, 
+        deviceId: req.params.deviceId 
+      })
+      .populate('mediaAttachments')
+      .populate({
+        path: 'contactGroupId',
+        populate: {
+          path: 'contacts',
+          select: 'name phoneNumber'
+        }
+      });
+    }
 
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found' });
@@ -377,7 +479,7 @@ router.put('/:deviceId/:campaignId/status', validateDeviceAccess, async (req, re
 // @desc    Delete a campaign
 // @route   DELETE /api/campaigns/:deviceId/:campaignId
 // @access  Private
-router.delete('/:deviceId/:campaignId', validateDeviceAccess, async (req, res) => {
+router.delete('/:deviceId/:campaignId', validateDeviceAccessForDelete, async (req, res) => {
   try {
     const campaign = await Campaign.findOneAndDelete({ _id: req.params.campaignId, userId: req.user.id, deviceId: req.params.deviceId });
 
@@ -507,35 +609,101 @@ router.put('/:deviceId/:campaignId', validateDeviceAccess, uploadMedia, async (r
             }
             
             // Jika mediaAttachments dari library digunakan, dan ada req.file, fail baru diabaikan.
-            if (req.file && req.file.path) {
-                const fs = require('fs');
-                console.log("New file uploaded but mediaAttachments (library) provided. Deleting uploaded file:", req.file.path);
-                fs.unlink(req.file.path, (err) => {
-                    if (err) console.error("Error deleting redundant uploaded file during campaign update:", err);
-                });
+            if (req.file && req.file.buffer) {
+                console.log("New file uploaded but mediaAttachments (library) provided. File buffer will be ignored (memory storage).");
+                // No need to delete file since it's in memory storage
             }
         } else if (req.file) {
             // Jika tiada arahan mediaAttachments dari body, TAPI ada fail baru diupload
             // Ini bermakna pengguna mahu gantikan semua media lama dengan fail baru ini.
             try {
-                const newMediaRecord = await Media.create({
+                console.log("Processing uploaded file for campaign update (memory storage):", {
+                    originalname: req.file.originalname,
+                    mimetype: req.file.mimetype,
+                    size: req.file.size,
+                    hasBuffer: !!req.file.buffer
+                });
+
+                // Use S3 service for file upload (same logic as media controller)
+                const s3Service = require('../services/s3Service.js');
+                const mediaCompressionService = require('../services/mediaCompressionService.js');
+                
+                // Compress media if needed
+                let finalBuffer = req.file.buffer;
+                let finalMimeType = req.file.mimetype;
+                let finalFileName = req.file.originalname;
+                let compressionInfo = null;
+                
+                if (mediaCompressionService.needsCompression(req.file.buffer.length, req.file.mimetype)) {
+                    console.log("File needs compression for campaign update");
+                    try {
+                        const compressionResult = await mediaCompressionService.compressMedia(
+                            req.file.buffer, 
+                            req.file.mimetype, 
+                            req.file.originalname
+                        );
+                        
+                        finalBuffer = compressionResult.buffer;
+                        finalMimeType = compressionResult.mimeType;
+                        finalFileName = compressionResult.fileName;
+                        compressionInfo = {
+                            originalSize: compressionResult.originalSize,
+                            compressedSize: compressionResult.compressedSize,
+                            compressionRatio: compressionResult.compressionRatio,
+                            compressionApplied: compressionResult.compressionApplied
+                        };
+                        console.log("Compression completed for campaign update:", compressionInfo);
+                    } catch (compressionError) {
+                        console.warn("Compression failed for campaign update, using original file:", compressionError.message);
+                    }
+                }
+
+                // Upload to S3
+                const uploadResult = await s3Service.uploadFile(
+                    finalBuffer, 
+                    finalFileName, 
+                    finalMimeType, 
+                    req.user.id.toString()
+                );
+                
+                if (!uploadResult.success) {
+                    throw new Error('S3 upload failed');
+                }
+
+                console.log("S3 upload successful for campaign update:", uploadResult.fileName);
+
+                // Create media record
+                const mediaData = {
                     user: req.user.id,
                     originalName: req.file.originalname,
-                    fileName: req.file.filename,
-                    filePath: `/uploads/media/${req.file.filename}`,
-                    fileType: req.file.mimetype,
-                    fileSize: req.file.size,
-                });
+                    fileName: uploadResult.fileName,
+                    filePath: uploadResult.filePath,
+                    fileType: finalMimeType,
+                    fileSize: uploadResult.fileSize,
+                    storageType: uploadResult.storageType,
+                    fileUrl: uploadResult.fileUrl
+                };
+
+                // Add compression info if available
+                if (compressionInfo) {
+                    mediaData.compressionInfo = compressionInfo;
+                }
+
+                // Add S3 metadata
+                if (uploadResult.storageType === 's3' && uploadResult.metadata) {
+                    mediaData.s3Metadata = {
+                        bucket: uploadResult.metadata.bucket,
+                        key: uploadResult.metadata.key,
+                        eTag: uploadResult.metadata.eTag
+                    };
+                }
+
+                const newMediaRecord = await Media.create(mediaData);
                 finalMediaAttachmentIds = [newMediaRecord._id]; // Gantikan dengan media baru
                 console.log("New Media record created and replaced attachments for campaign update:", newMediaRecord._id);
             } catch (mediaCreationError) {
                 console.error("Error creating Media record for uploaded file during campaign update:", mediaCreationError);
-                // Padam fail yang diupload jika rekod Media gagal dicipta
-                const fs = require('fs');
-                fs.unlink(req.file.path, (errUnlink) => {
-                    if (errUnlink) console.error("Error deleting uploaded file after Media creation failure during update:", errUnlink);
-                });
-                // Jangan teruskan jika ada ralat kritikal pemprosesan media
+                // No need to delete file since it's memory storage
                 return res.status(500).json({ message: 'Failed to process uploaded media file for update.' });
             }
         }
@@ -548,15 +716,9 @@ router.put('/:deviceId/:campaignId', validateDeviceAccess, uploadMedia, async (r
 
     } catch (error) {
         console.error('Error updating campaign:', error);
-        // Padam fail yang mungkin telah dimuat naik jika ralat berlaku dan belum diuruskan
-        if (req.file && req.file.path) {
-            // Semak jika fail telah diproses (contohnya, jika newMediaRecord telah dicipta)
-            // Ini agak sukar untuk ditentukan di sini tanpa state tambahan.
-            // Sebagai langkah selamat, kita cuba padam jika ada ralat umum.
-            const fs = require('fs');
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error("Error deleting uploaded file after failed campaign update (general error):", err);
-            });
+        // For memory storage, no need to delete files on error
+        if (req.file && req.file.buffer) {
+            console.log("Campaign update failed, file buffer will be garbage collected (memory storage)");
         }
         if (!res.headersSent) {
             res.status(500).json({ message: 'Server Error updating campaign' });
@@ -661,19 +823,29 @@ router.post('/:deviceId/:campaignId/execute', validateDeviceAccess, async (req, 
 // @access  Private
 router.get('/:deviceId/:campaignId/debug', validateDeviceAccess, async (req, res) => {
     try {
-        const campaign = await Campaign.findOne({ 
+        let campaign = await Campaign.findOne({ 
             _id: req.params.campaignId, 
             userId: req.user.id, 
             deviceId: req.params.deviceId 
         })
-        .populate('mediaAttachments')
-        .populate({
-            path: 'contactGroupId',
-            populate: {
-                path: 'contacts',
-                select: 'name phoneNumber'
-            }
-        });
+        .populate('mediaAttachments');
+
+        // Conditionally populate contactGroupId only if it's not "all_contacts"
+        if (campaign && campaign.contactGroupId && campaign.contactGroupId !== 'all_contacts') {
+            campaign = await Campaign.findOne({ 
+                _id: req.params.campaignId, 
+                userId: req.user.id, 
+                deviceId: req.params.deviceId 
+            })
+            .populate('mediaAttachments')
+            .populate({
+                path: 'contactGroupId',
+                populate: {
+                    path: 'contacts',
+                    select: 'name phoneNumber'
+                }
+            });
+        }
 
         if (!campaign) {
             return res.status(404).json({ message: 'Campaign not found' });
@@ -696,12 +868,53 @@ router.get('/:deviceId/:campaignId/debug', validateDeviceAccess, async (req, res
             debugInfo: {
                 campaignType: campaign.campaignType,
                 hasContactGroup: !!campaign.contactGroupId,
-                contactGroupPopulated: !!campaign.contactGroupId?.contacts,
-                contactCount: campaign.contactGroupId?.contacts?.length || 0
+                isAllContactsMode: campaign.contactGroupId === 'all_contacts',
+                contactGroupPopulated: campaign.contactGroupId === 'all_contacts' ? false : !!campaign.contactGroupId?.contacts,
+                contactCount: campaign.contactGroupId === 'all_contacts' ? 'All contacts will be used' : (campaign.contactGroupId?.contacts?.length || 0)
             }
         });
     } catch (error) {
         console.error('Error fetching campaign debug details:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+});
+
+// @desc    Debug user devices and campaigns
+// @route   GET /api/campaigns/debug/devices/:userId
+// @access  Private
+router.get('/debug/devices/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Get all devices for user
+        const devices = await WhatsappDevice.find({ userId: userId });
+        
+        // Get all campaigns for user to see what deviceIds are used
+        const campaigns = await Campaign.find({ userId: userId }).select('deviceId campaignName campaignType');
+        
+        res.json({
+            userId: userId,
+            deviceCount: devices.length,
+            devices: devices.map(d => ({
+                _id: d._id,
+                deviceId: d.deviceId,
+                name: d.name,
+                number: d.number,
+                connectionStatus: d.connectionStatus,
+                createdAt: d.createdAt,
+                lastConnectedAt: d.lastConnectedAt
+            })),
+            campaignCount: campaigns.length,
+            campaignDeviceIds: [...new Set(campaigns.map(c => c.deviceId))], // Unique device IDs used in campaigns
+            campaigns: campaigns.map(c => ({
+                _id: c._id,
+                name: c.campaignName,
+                type: c.campaignType,
+                deviceId: c.deviceId
+            }))
+        });
+    } catch (error) {
+        console.error('Error debugging user devices:', error);
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 });

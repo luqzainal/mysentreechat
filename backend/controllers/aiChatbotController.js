@@ -37,6 +37,111 @@ const getAiDeviceSummary = asyncHandler(async (req, res) => {
     res.json(summary);
 });
 
+// @desc    Check if user has AI-powered campaigns (for limiting AI usage)
+// @route   GET /api/ai-chatbot/check-ai-usage/:userId
+// @access  Private
+const checkAiUsage = asyncHandler(async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        console.log(`[checkAiUsage] Checking AI usage for userId: ${userId}, request user: ${req.user?.id}`);
+        
+        // Ensure user can only check their own usage
+        if (req.user.id !== userId) {
+            console.warn(`[checkAiUsage] Unauthorized access attempt. Request user: ${req.user.id}, target user: ${userId}`);
+            res.status(403);
+            throw new Error('Not authorized to check AI usage for this user.');
+        }
+
+        const existingAiCampaign = await Campaign.findOne({
+            userId: userId,
+            campaignType: 'ai_chatbot',
+            useAiFeature: 'use_ai',
+            $or: [
+                { status: 'enable', statusEnabled: true },
+                { status: 'enable' },
+                { statusEnabled: true }
+            ]
+        }).select('_id name campaignName status statusEnabled');
+
+        console.log(`[checkAiUsage] Found existing AI campaign:`, existingAiCampaign ? existingAiCampaign._id : 'None');
+
+        const hasAiCampaign = !!existingAiCampaign;
+        
+        const response = {
+            hasAiCampaign,
+            aiCampaign: existingAiCampaign ? {
+                id: existingAiCampaign._id,
+                name: existingAiCampaign.name || existingAiCampaign.campaignName,
+                status: existingAiCampaign.status,
+                statusEnabled: existingAiCampaign.statusEnabled
+            } : null,
+            canCreateAi: !hasAiCampaign
+        };
+        
+        console.log(`[checkAiUsage] Returning response:`, response);
+        res.json(response);
+    } catch (error) {
+        console.error(`[checkAiUsage] Error:`, error);
+        res.status(500).json({ 
+            error: 'Failed to check AI usage',
+            message: error.message,
+            hasAiCampaign: false,
+            canCreateAi: true,
+            aiCampaign: null
+        });
+    }
+});
+
+// @desc    Get available flow IDs for nextBotAction dropdown
+// @route   GET /api/ai-chatbot/available-flows/:userId
+// @access  Private
+const getAvailableFlows = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    
+    // Ensure user can only get their own flows
+    if (req.user.id !== userId) {
+        res.status(403);
+        throw new Error('Not authorized to get flows for this user.');
+    }
+
+    try {
+        // Get all AI chatbot campaigns for the user
+        const campaigns = await Campaign.find({
+            userId: userId,
+            campaignType: 'ai_chatbot',
+            status: 'enable'
+        }).select('_id flowId name campaignName useAiFeature').sort({ createdAt: -1 });
+
+        const availableFlows = campaigns.map(campaign => ({
+            flowId: campaign.flowId,
+            campaignId: campaign._id,
+            name: campaign.name || campaign.campaignName || `Campaign ${campaign.flowId}`,
+            type: campaign.useAiFeature === 'use_ai' ? 'AI-Powered' : 'Static Response'
+        }));
+
+        // Add special AI_REPLY option
+        availableFlows.unshift({
+            flowId: 'AI_REPLY',
+            campaignId: null,
+            name: '🤖 AI Response (Use AI for dynamic reply)',
+            type: 'AI-Powered'
+        });
+
+        res.json({
+            userId,
+            flows: availableFlows,
+            totalFlows: availableFlows.length
+        });
+    } catch (error) {
+        console.error('[getAvailableFlows] Error:', error);
+        res.status(500).json({ 
+            error: 'Failed to get available flows',
+            message: error.message
+        });
+    }
+});
+
 // @desc    Update AI status for a specific device
 // @route   PUT /api/ai-chatbot/devices/:deviceId/status
 // @access  Private
@@ -112,6 +217,7 @@ const getAiCampaigns = asyncHandler(async (req, res) => {
     const formattedCampaigns = campaigns.map(c => ({
         _id: c._id,
         id: c._id, // For compatibility
+        flowId: c.flowId,
         name: c.name || c.campaignName,
         status: c.status === 'enable' ? 'Enabled' : 'Disabled',
         useAI: c.useAiFeature === 'use_ai',
@@ -125,7 +231,7 @@ const getAiCampaigns = asyncHandler(async (req, res) => {
         type: c.type,
         sendTo: c.sendTo,
         presenceDelayStatus: c.presenceDelayStatus,
-        saveData: c.saveData,
+        appointmentLink: c.appointmentLink,
         apiRestDataStatus: c.apiRestDataStatus,
         // Conversation Flow Features
         conversationMode: c.conversationMode,
@@ -170,7 +276,7 @@ const getAiCampaign = asyncHandler(async (req, res) => {
             userId: userId,
             deviceId: deviceId,
             campaignType: 'ai_chatbot'
-        });
+        }).populate('mediaAttachments');
 
         if (!campaign) {
             console.log(`[getAiCampaign] Campaign ${campaignId} not found for device ${deviceId}`);
@@ -187,10 +293,21 @@ const getAiCampaign = asyncHandler(async (req, res) => {
     }
 
     console.log(`[getAiCampaign] Found campaign: ${campaign.name}`);
+    console.log(`[getAiCampaign] Media attachments:`, {
+        count: campaign.mediaAttachments?.length || 0,
+        attachments: campaign.mediaAttachments,
+        populatedMedia: campaign.mediaAttachments?.map(media => ({
+            id: media._id,
+            fileName: media.fileName,
+            originalName: media.originalName,
+            filePath: media.filePath
+        }))
+    });
 
     // Return campaign data in the format expected by frontend
     res.json({
         _id: campaign._id,
+        flowId: campaign.flowId,
         name: campaign.name,
         status: campaign.status,
         isNotMatchDefaultResponse: campaign.isNotMatchDefaultResponse,
@@ -201,7 +318,7 @@ const getAiCampaign = asyncHandler(async (req, res) => {
         nextBotAction: campaign.nextBotAction,
         presenceDelayTime: campaign.presenceDelayTime,
         presenceDelayStatus: campaign.presenceDelayStatus,
-        saveData: campaign.saveData,
+        appointmentLink: campaign.appointmentLink,
         apiRestDataStatus: campaign.apiRestDataStatus,
         captionAi: campaign.captionAi,
         useAiFeature: campaign.useAiFeature,
@@ -234,8 +351,24 @@ const createAiCampaign = asyncHandler(async (req, res) => {
     }
 
     // Process keywords if provided as string
+    console.log(`[createAiCampaign] Raw keywords received:`, {
+        keywords: req.body.keywords,
+        type: typeof req.body.keywords,
+        length: req.body.keywords ? req.body.keywords.length : 0
+    });
+    
     if (req.body.keywords && typeof req.body.keywords === 'string') {
+        const originalKeywords = req.body.keywords;
         req.body.keywords = req.body.keywords.split(',').map(k => k.trim()).filter(k => k);
+        console.log(`[createAiCampaign] Processed keywords:`, {
+            original: originalKeywords,
+            processed: req.body.keywords,
+            count: req.body.keywords.length
+        });
+    } else if (req.body.keywords && Array.isArray(req.body.keywords)) {
+        console.log(`[createAiCampaign] Keywords already array:`, req.body.keywords);
+    } else {
+        console.log(`[createAiCampaign] No keywords or invalid format`);
     }
 
     // Process API Rest Config if provided
@@ -263,25 +396,123 @@ const createAiCampaign = asyncHandler(async (req, res) => {
         req.body.endConversationKeywords = req.body.endConversationKeywords.split(',').map(k => k.trim()).filter(k => k).join(',');
     }
 
-    // Handle media file if uploaded
+    // Check if user is trying to use AI feature and already has an AI-powered campaign
+    if (req.body.useAiFeature === 'use_ai') {
+        const existingAiCampaign = await Campaign.findOne({
+            userId: userId,
+            campaignType: 'ai_chatbot',
+            useAiFeature: 'use_ai',
+            $or: [
+                { status: 'enable', statusEnabled: true },
+                { status: 'enable' },
+                { statusEnabled: true }
+            ]
+        });
+
+        if (existingAiCampaign) {
+            res.status(400);
+            throw new Error('You can only have one AI-powered campaign at a time. Please disable your existing AI campaign first or use keyword-only response for this campaign.');
+        }
+
+        console.log(`[createAiCampaign] User ${userId} is creating their first AI-powered campaign`);
+    }
+
+    // Handle media file if uploaded OR selected from library
     let finalMediaAttachmentIds = [];
+    
+    console.log(`[createAiCampaign] Media processing:`, {
+        hasUploadedFile: !!req.file,
+        selectedMediaLibraryId: req.body.selectedMediaLibraryId,
+        reqBodyKeys: Object.keys(req.body)
+    });
+    
     if (req.file) {
+        // Handle uploaded file using S3 service (same logic as campaign routes)
         try {
-            const newMediaRecord = await Media.create({
+            const s3Service = require('../services/s3Service.js');
+            const mediaCompressionService = require('../services/mediaCompressionService.js');
+            
+            // Compress media if needed
+            let finalBuffer = req.file.buffer;
+            let compressionInfo = { compressionApplied: false };
+            
+            try {
+                const compressionResult = await mediaCompressionService.compressMedia(
+                    req.file.buffer, 
+                    req.file.mimetype,
+                    req.file.originalname
+                );
+                
+                if (compressionResult.compressed) {
+                    finalBuffer = compressionResult.buffer;
+                    compressionInfo = {
+                        originalSize: req.file.size,
+                        compressedSize: compressionResult.buffer.length,
+                        compressionRatio: ((req.file.size - compressionResult.buffer.length) / req.file.size * 100),
+                        compressionApplied: true
+                    };
+                    console.log("[createAiCampaign] Compression applied:", compressionInfo);
+                } else {
+                    console.log("[createAiCampaign] No compression applied - file under threshold or unsupported format");
+                }
+            } catch (compressionError) {
+                console.warn("[createAiCampaign] Compression failed, using original file:", compressionError.message);
+            }
+
+            // Upload to S3
+            const uploadResult = await s3Service.uploadFile(finalBuffer, req.file.originalname, req.file.mimetype, userId);
+            
+            if (!uploadResult.success) {
+                console.error("[createAiCampaign] S3 upload failed:", uploadResult.error);
+                throw new Error('S3 upload failed');
+            }
+
+            console.log("S3 upload successful for AI chatbot creation:", uploadResult.fileName);
+
+            // Create media record
+            const mediaData = {
                 user: userId,
                 originalName: req.file.originalname,
-                fileName: req.file.filename,
-                filePath: `/uploads/media/${req.file.filename}`,
+                fileName: uploadResult.fileName,
+                filePath: uploadResult.filePath,
                 fileType: req.file.mimetype,
-                fileSize: req.file.size,
-            });
+                fileSize: finalBuffer.length, // Use compressed size if compression was applied
+                storageType: 's3',
+                fileUrl: uploadResult.fileUrl,
+                s3Metadata: {
+                    bucket: uploadResult.bucket,
+                    key: uploadResult.key,
+                    eTag: uploadResult.eTag
+                },
+                compressionInfo: compressionInfo
+            };
+
+            const newMediaRecord = await Media.create(mediaData);
             finalMediaAttachmentIds.push(newMediaRecord._id);
-            console.log("New Media record created for AI chatbot:", newMediaRecord._id);
+            console.log("[createAiCampaign] New Media record created for AI chatbot:", newMediaRecord._id);
         } catch (mediaCreationError) {
             console.error("Error creating Media record for AI chatbot:", mediaCreationError);
             res.status(500);
             throw new Error('Failed to process uploaded media file.');
         }
+    } else if (req.body.selectedMediaLibraryId) {
+        // Handle selected media from library
+        console.log("[createAiCampaign] Using selected media from library:", req.body.selectedMediaLibraryId);
+        
+        // Verify media exists and belongs to user
+        const selectedMedia = await Media.findOne({
+            _id: req.body.selectedMediaLibraryId,
+            user: userId
+        });
+        
+        if (selectedMedia) {
+            finalMediaAttachmentIds.push(selectedMedia._id);
+            console.log("[createAiCampaign] Selected media from library verified:", selectedMedia._id);
+        } else {
+            console.warn("[createAiCampaign] Selected media not found or not authorized:", req.body.selectedMediaLibraryId);
+        }
+    } else {
+        console.log("[createAiCampaign] No media file uploaded or selected from library");
     }
 
     const campaignData = {
@@ -293,6 +524,16 @@ const createAiCampaign = asyncHandler(async (req, res) => {
         // Set campaignName to name for compatibility if needed
         campaignName: req.body.name
     };
+
+    console.log(`[createAiCampaign] Final campaign data before save:`, {
+        name: campaignData.name,
+        keywords: campaignData.keywords,
+        keywordsType: typeof campaignData.keywords,
+        keywordsLength: Array.isArray(campaignData.keywords) ? campaignData.keywords.length : 'not array',
+        type: campaignData.type,
+        useAiFeature: campaignData.useAiFeature,
+        captionAi: campaignData.captionAi ? campaignData.captionAi.substring(0, 50) + '...' : null
+    });
 
     const campaign = await Campaign.create(campaignData);
 
@@ -356,25 +597,127 @@ const updateAiCampaign = asyncHandler(async (req, res) => {
         req.body.endConversationKeywords = req.body.endConversationKeywords.split(',').map(k => k.trim()).filter(k => k).join(',');
     }
 
-    // Handle media file if uploaded
+    // Check if user is trying to switch to AI feature and already has another AI-powered campaign
+    if (req.body.useAiFeature === 'use_ai' && campaign.useAiFeature !== 'use_ai') {
+        const existingAiCampaign = await Campaign.findOne({
+            userId: userId,
+            campaignType: 'ai_chatbot',
+            useAiFeature: 'use_ai',
+            _id: { $ne: campaignId }, // Exclude current campaign
+            $or: [
+                { status: 'enable', statusEnabled: true },
+                { status: 'enable' },
+                { statusEnabled: true }
+            ]
+        });
+
+        if (existingAiCampaign) {
+            res.status(400);
+            throw new Error('You can only have one AI-powered campaign at a time. Please disable your existing AI campaign first or keep this campaign as keyword-only response.');
+        }
+
+        console.log(`[updateAiCampaign] User ${userId} is switching campaign ${campaignId} to AI-powered`);
+    }
+
+    // Handle media file if uploaded OR selected from library
     let finalMediaAttachmentIds = [...(campaign.mediaAttachments || [])];
+    
+    console.log(`[updateAiCampaign] Media processing for campaign ${campaignId}:`, {
+        hasUploadedFile: !!req.file,
+        selectedMediaLibraryId: req.body.selectedMediaLibraryId,
+        existingMediaAttachments: campaign.mediaAttachments,
+        reqBodyKeys: Object.keys(req.body)
+    });
+    
     if (req.file) {
+        // Handle uploaded file using S3 service (same logic as campaign routes)
         try {
-            const newMediaRecord = await Media.create({
+            const s3Service = require('../services/s3Service.js');
+            const mediaCompressionService = require('../services/mediaCompressionService.js');
+            
+            // Compress media if needed
+            let finalBuffer = req.file.buffer;
+            let compressionInfo = { compressionApplied: false };
+            
+            try {
+                const compressionResult = await mediaCompressionService.compressMedia(
+                    req.file.buffer, 
+                    req.file.mimetype,
+                    req.file.originalname
+                );
+                
+                if (compressionResult.compressed) {
+                    finalBuffer = compressionResult.buffer;
+                    compressionInfo = {
+                        originalSize: req.file.size,
+                        compressedSize: compressionResult.buffer.length,
+                        compressionRatio: ((req.file.size - compressionResult.buffer.length) / req.file.size * 100),
+                        compressionApplied: true
+                    };
+                    console.log("[updateAiCampaign] Compression applied:", compressionInfo);
+                } else {
+                    console.log("[updateAiCampaign] No compression applied - file under threshold or unsupported format");
+                }
+            } catch (compressionError) {
+                console.warn("[updateAiCampaign] Compression failed, using original file:", compressionError.message);
+            }
+
+            // Upload to S3
+            const uploadResult = await s3Service.uploadFile(finalBuffer, req.file.originalname, req.file.mimetype, userId);
+            
+            if (!uploadResult.success) {
+                console.error("[updateAiCampaign] S3 upload failed:", uploadResult.error);
+                throw new Error('S3 upload failed');
+            }
+
+            console.log("S3 upload successful for AI chatbot update:", uploadResult.fileName);
+
+            // Create media record
+            const mediaData = {
                 user: userId,
                 originalName: req.file.originalname,
-                fileName: req.file.filename,
-                filePath: `/uploads/media/${req.file.filename}`,
+                fileName: uploadResult.fileName,
+                filePath: uploadResult.filePath,
                 fileType: req.file.mimetype,
-                fileSize: req.file.size,
-            });
+                fileSize: finalBuffer.length, // Use compressed size if compression was applied
+                storageType: 's3',
+                fileUrl: uploadResult.fileUrl,
+                s3Metadata: {
+                    bucket: uploadResult.bucket,
+                    key: uploadResult.key,
+                    eTag: uploadResult.eTag
+                },
+                compressionInfo: compressionInfo
+            };
+
+            const newMediaRecord = await Media.create(mediaData);
             finalMediaAttachmentIds = [newMediaRecord._id]; // Replace existing media
-            console.log("New Media record created for AI chatbot update:", newMediaRecord._id);
+            console.log("[updateAiCampaign] New Media record created for AI chatbot update:", newMediaRecord._id);
         } catch (mediaCreationError) {
             console.error("Error creating Media record for AI chatbot update:", mediaCreationError);
             res.status(500);
             throw new Error('Failed to process uploaded media file.');
         }
+    } else if (req.body.selectedMediaLibraryId) {
+        // Handle selected media from library
+        console.log("[updateAiCampaign] Using selected media from library:", req.body.selectedMediaLibraryId);
+        
+        // Verify media exists and belongs to user
+        const selectedMedia = await Media.findOne({
+            _id: req.body.selectedMediaLibraryId,
+            user: userId
+        });
+        
+        if (selectedMedia) {
+            finalMediaAttachmentIds = [selectedMedia._id]; // Replace existing media
+            console.log("[updateAiCampaign] Selected media from library verified:", selectedMedia._id);
+        } else {
+            console.warn("[updateAiCampaign] Selected media not found or not authorized:", req.body.selectedMediaLibraryId);
+            // Keep existing media if selected media not found
+        }
+    } else {
+        console.log("[updateAiCampaign] No new media file uploaded or selected - keeping existing media");
+        // Keep existing media attachments
     }
 
     const updatedCampaign = await Campaign.findOneAndUpdate(
@@ -574,6 +917,8 @@ const updateAiSettings = asyncHandler(async (req, res) => {
 
 module.exports = {
     getAiDeviceSummary,
+    checkAiUsage,
+    getAvailableFlows,
     updateAiDeviceStatus,
     getAiCampaigns,
     getAiCampaign,

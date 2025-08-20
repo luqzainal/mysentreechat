@@ -31,7 +31,7 @@ class AIChatbotProcessor {
                     campaignType: 'ai_chatbot',
                     status: 'enable',
                     statusEnabled: true
-                }).sort({ createdAt: -1 }); // Latest first for priority
+                }).sort({ createdAt: 1 }); // Oldest first - keyword campaigns should have priority over AI default response
 
                 console.log(`[AIChatbotProcessor] Found campaigns:`, campaigns.map(c => ({
                     id: c._id,
@@ -102,12 +102,47 @@ class AIChatbotProcessor {
                 }
             }
 
-            // Check each campaign for new matches
-            for (const campaign of activeCampaigns) {
+            // Separate campaigns by type for proper priority
+            const keywordCampaigns = activeCampaigns.filter(c => 
+                c.isNotMatchDefaultResponse !== 'yes' && 
+                c.isNotMatchDefaultResponse !== true
+            );
+            const defaultResponseCampaigns = activeCampaigns.filter(c => 
+                c.isNotMatchDefaultResponse === 'yes' || 
+                c.isNotMatchDefaultResponse === true
+            );
+
+            console.log(`[AIChatbotProcessor] Processing ${keywordCampaigns.length} keyword campaigns and ${defaultResponseCampaigns.length} default response campaigns`);
+
+            // Check keyword campaigns first (higher priority)
+            for (const campaign of keywordCampaigns) {
                 const shouldRespond = this.checkMessageMatch(campaign, messageText, remoteJid);
                 
                 if (shouldRespond) {
-                    console.log(`[AIChatbotProcessor] Campaign ${campaign._id} (${campaign.name}) matched message. Sending response...`);
+                    console.log(`[AIChatbotProcessor] Keyword campaign ${campaign._id} (${campaign.name}) matched message. Sending response...`);
+                    
+                    // Start conversation if in continuous mode
+                    if (campaign.conversationMode === 'continuous_chat') {
+                        conversationService.startConversation(userId, remoteJid, campaign._id.toString());
+                    }
+                    
+                    await this.sendChatbotResponse(userId, deviceId, campaign, remoteJid, messageText, false);
+                    
+                    // Update campaign statistics
+                    await Campaign.findByIdAndUpdate(campaign._id, {
+                        $inc: { 'aiStats.totalInteractions': 1 }
+                    });
+
+                    return true; // Stop processing after first match
+                }
+            }
+
+            // If no keyword campaigns matched, try default response campaigns
+            for (const campaign of defaultResponseCampaigns) {
+                const shouldRespond = this.checkMessageMatch(campaign, messageText, remoteJid);
+                
+                if (shouldRespond) {
+                    console.log(`[AIChatbotProcessor] Default response campaign ${campaign._id} (${campaign.name}) matched message. Sending response...`);
                     
                     // Start conversation if in continuous mode
                     if (campaign.conversationMode === 'continuous_chat') {
@@ -144,6 +179,7 @@ class AIChatbotProcessor {
             keywords: campaign.keywords,
             type: campaign.type,
             sendTo: campaign.sendTo,
+            isNotMatchDefaultResponse: campaign.isNotMatchDefaultResponse,
             remoteJid: remoteJid
         });
 
@@ -157,7 +193,19 @@ class AIChatbotProcessor {
             return false;
         }
 
-        // Check message type and keywords
+        // Check if this is a default response campaign (isNotMatchDefaultResponse = 'yes')
+        if (campaign.isNotMatchDefaultResponse === 'yes' || campaign.isNotMatchDefaultResponse === true) {
+            // This campaign handles unmatched messages with AI
+            console.log(`[AIChatbotProcessor] Default response campaign - will match any message`);
+            return true;
+        }
+
+        // Check message type and keywords for keyword-based campaigns
+        if (!campaign.keywords || campaign.keywords.length === 0) {
+            console.log(`[AIChatbotProcessor] No keywords defined for campaign ${campaign._id}`);
+            return false;
+        }
+
         switch (campaign.type) {
             case 'message_contains_keyword':
                 const keywordMatch = campaign.keywords.some(keyword => {
@@ -199,8 +247,42 @@ class AIChatbotProcessor {
         }
     }
 
+    // Helper method to check if message has keyword match
+    hasKeywordMatch(campaign, messageText) {
+        if (!campaign.keywords || campaign.keywords.length === 0) {
+            return false;
+        }
+
+        const lowerMessageText = messageText.toLowerCase();
+
+        switch (campaign.type) {
+            case 'message_contains_keyword':
+                return campaign.keywords.some(keyword => 
+                    lowerMessageText.includes(keyword.toLowerCase())
+                );
+
+            case 'message_contains_whole_keyword':
+                const words = lowerMessageText.split(/\s+/);
+                return campaign.keywords.some(keyword => 
+                    words.includes(keyword.toLowerCase())
+                );
+
+            case 'message_contains_regex':
+                try {
+                    const regex = new RegExp(campaign.keywords.join('|'), 'i');
+                    return regex.test(messageText);
+                } catch (error) {
+                    console.error(`[AIChatbotProcessor] Invalid regex in campaign ${campaign._id}:`, error);
+                    return false;
+                }
+
+            default:
+                return false;
+        }
+    }
+
     // Send chatbot response
-    async sendChatbotResponse(userId, deviceId, campaign, remoteJid, originalMessage, isContinuation = false) {
+    async sendChatbotResponse(userId, deviceId, campaign, remoteJid, originalMessage, isContinuation = false, messageData = {}) {
         try {
             const baileysService = require('./baileysService.js');
             const sock = baileysService.getWhatsAppSocket(userId);
@@ -218,11 +300,52 @@ class AIChatbotProcessor {
                 console.warn(`[AIChatbotProcessor] Failed to set presence, continuing anyway:`, presenceError.message);
             }
 
-            // Process response message
+            // Determine response type based on campaign settings
             let responseText;
+            let shouldUseAI = false;
+            let shouldSendMedia = false;
             
-            // Check if AI feature is enabled
-            if (campaign.useAiFeature === 'use_ai' && campaign.aiSpintax) {
+            console.log(`[AIChatbotProcessor] Campaign settings for ${campaign._id}:`, {
+                isNotMatchDefaultResponse: campaign.isNotMatchDefaultResponse,
+                useAiFeature: campaign.useAiFeature,
+                hasAiSpintax: !!(campaign.aiSpintax && campaign.aiSpintax.trim()),
+                hasMediaAttachments: !!(campaign.mediaAttachments && campaign.mediaAttachments.length > 0),
+                captionAi: campaign.captionAi ? campaign.captionAi.substring(0, 50) + '...' : null
+            });
+            
+            if (campaign.isNotMatchDefaultResponse === 'yes' || campaign.isNotMatchDefaultResponse === true) {
+                // Default response campaign - use AI if configured
+                if (campaign.useAiFeature === 'use_ai' && campaign.aiSpintax && campaign.aiSpintax.trim()) {
+                    shouldUseAI = true;
+                    console.log(`[AIChatbotProcessor] Default response campaign - using AI`);
+                } else {
+                    // Fallback to static response for default campaigns
+                    shouldSendMedia = (campaign.mediaAttachments && campaign.mediaAttachments.length > 0);
+                    console.log(`[AIChatbotProcessor] Default response campaign - using static response (media: ${shouldSendMedia})`);
+                }
+            } else {
+                // Keyword-based campaign
+                const hasKeywordMatch = this.hasKeywordMatch(campaign, originalMessage);
+                console.log(`[AIChatbotProcessor] Keyword match check result: ${hasKeywordMatch}`);
+                
+                if (hasKeywordMatch) {
+                    // Keywords matched - determine response type based on campaign configuration
+                    if (campaign.useAiFeature === 'use_ai' && campaign.aiSpintax && campaign.aiSpintax.trim()) {
+                        shouldUseAI = true;
+                        console.log(`[AIChatbotProcessor] Keywords matched - using AI response`);
+                    } else {
+                        // Use static response (caption + optional media)
+                        shouldSendMedia = (campaign.mediaAttachments && campaign.mediaAttachments.length > 0);
+                        console.log(`[AIChatbotProcessor] Keywords matched - using static response (media: ${shouldSendMedia})`);
+                    }
+                } else {
+                    console.log(`[AIChatbotProcessor] No keyword match for campaign ${campaign._id}, skipping response`);
+                    return false;
+                }
+            }
+            
+            // Process response based on determined type
+            if (shouldUseAI) {
                 // Use AI to generate dynamic response
                 console.log(`[AIChatbotProcessor] Using AI to generate response for campaign ${campaign._id}`);
                 
@@ -245,6 +368,12 @@ class AIChatbotProcessor {
                 
                 if (aiResult && aiResult.response) {
                     responseText = aiResult.response;
+                    
+                    // Add appointment link if available for AI response
+                    if (campaign.appointmentLink && campaign.appointmentLink.trim()) {
+                        responseText += `\n\n📅 Book an appointment: ${campaign.appointmentLink}`;
+                        console.log(`[AIChatbotProcessor] Added appointment link to AI response: ${campaign.appointmentLink}`);
+                    }
                     
                     // Log AI usage for campaign stats
                     try {
@@ -270,11 +399,42 @@ class AIChatbotProcessor {
                 } else {
                     console.warn(`[AIChatbotProcessor] AI generation failed, falling back to caption for campaign ${campaign._id}`);
                     responseText = processSpintax(campaign.captionAi || campaign.caption || 'Hello! How can I help you?');
+                    
+                    // Add appointment link if available for fallback response too
+                    if (campaign.appointmentLink && campaign.appointmentLink.trim()) {
+                        responseText += `\n\n📅 Book an appointment: ${campaign.appointmentLink}`;
+                        console.log(`[AIChatbotProcessor] Added appointment link to fallback response: ${campaign.appointmentLink}`);
+                    }
                 }
             } else {
                 // Use static caption with bubble selection and spintax processing
-                const selectedBubbleText = conversationService.selectRandomBubble(campaign);
-                responseText = processSpintax(selectedBubbleText);
+                if (campaign.bubbleOptions && campaign.bubbleOptions.length > 0) {
+                    // Use flow-based bubble selection if in conversation, otherwise use caption
+                    const conversationStatus = conversationService.getConversationStatus(userId, remoteJid);
+                    if (conversationStatus && campaign.conversationMode === 'continuous_chat') {
+                        // Flow-based selection for active conversations
+                        const selectedBubbleText = conversationService.selectFlowBubble(campaign, userId, remoteJid);
+                        responseText = processSpintax(selectedBubbleText);
+                        console.log(`[AIChatbotProcessor] Using flow-based bubble selection for conversation: "${responseText}"`);
+                    } else {
+                        // Random selection for initial response or non-conversation mode
+                        const selectedBubbleText = conversationService.selectRandomBubble(campaign);
+                        responseText = processSpintax(selectedBubbleText);
+                        console.log(`[AIChatbotProcessor] Using random bubble selection: "${responseText}"`);
+                    }
+                } else {
+                    // Fallback to captionAi field
+                    responseText = processSpintax(campaign.captionAi || campaign.caption || 'Hello! How can I help you?');
+                    console.log(`[AIChatbotProcessor] Using caption fallback: "${responseText}"`);
+                }
+                
+                // Add appointment link if available
+                if (campaign.appointmentLink && campaign.appointmentLink.trim()) {
+                    responseText += `\n\n📅 Book an appointment: ${campaign.appointmentLink}`;
+                    console.log(`[AIChatbotProcessor] Added appointment link to response: ${campaign.appointmentLink}`);
+                }
+                
+                console.log(`[AIChatbotProcessor] Using static response for campaign ${campaign._id}: "${responseText}"`);
             }
 
             // Simulate typing if enabled
@@ -284,8 +444,100 @@ class AIChatbotProcessor {
                 await new Promise(resolve => setTimeout(resolve, delayTime * 1000));
             }
 
-            // Send response
-            const sentMessage = await sock.sendMessage(remoteJid, { text: responseText });
+            // Send media first if required
+            let sentMessage;
+            if (shouldSendMedia && campaign.mediaAttachments && campaign.mediaAttachments.length > 0) {
+                console.log(`[AIChatbotProcessor] Sending media for campaign ${campaign._id}`);
+                
+                try {
+                    const Media = require('../models/Media');
+                    const media = await Media.findById(campaign.mediaAttachments[0]);
+                    
+                    if (media) {
+                        console.log(`[AIChatbotProcessor] Processing media file: ${media.fileName}, storage: ${media.storageType}`);
+                        
+                        // Use the same logic as WhatsApp controller for media handling
+                        const s3Service = require('./s3Service.js');
+                        const fileInfo = await s3Service.getFileInfo(media);
+                        
+                        let mediaBuffer;
+                        
+                        if (fileInfo.isS3) {
+                            // Download from S3 as buffer
+                            console.log(`[AIChatbotProcessor] Downloading S3 file: ${media.fileName}`);
+                            
+                            const https = require('https');
+                            const http = require('http');
+                            const url = require('url');
+                            
+                            mediaBuffer = await new Promise((resolve, reject) => {
+                                const parsedUrl = url.parse(fileInfo.accessUrl);
+                                const client = parsedUrl.protocol === 'https:' ? https : http;
+                                
+                                client.get(fileInfo.accessUrl, (response) => {
+                                    if (response.statusCode !== 200) {
+                                        return reject(new Error(`Failed to download: ${response.statusCode}`));
+                                    }
+                                    
+                                    const chunks = [];
+                                    response.on('data', (chunk) => chunks.push(chunk));
+                                    response.on('end', () => resolve(Buffer.concat(chunks)));
+                                }).on('error', reject);
+                            });
+                            
+                            console.log(`[AIChatbotProcessor] Downloaded ${mediaBuffer.length} bytes from S3`);
+                        } else {
+                            // Read local file as buffer
+                            const fs = require('fs');
+                            const path = require('path');
+                            const localPath = path.join(__dirname, '..', media.filePath);
+                            
+                            console.log(`[AIChatbotProcessor] Reading local file: ${localPath}`);
+                            
+                            if (fs.existsSync(localPath)) {
+                                mediaBuffer = fs.readFileSync(localPath);
+                                console.log(`[AIChatbotProcessor] Read ${mediaBuffer.length} bytes from local file`);
+                            } else {
+                                throw new Error(`Local media file not found: ${localPath}`);
+                            }
+                        }
+                        
+                        // Prepare media message with buffer
+                        let mediaMessage = {};
+                        if (media.fileType.startsWith('image/')) {
+                            mediaMessage.image = mediaBuffer;
+                        } else if (media.fileType.startsWith('video/')) {
+                            mediaMessage.video = mediaBuffer;
+                        } else if (media.fileType.startsWith('audio/')) {
+                            mediaMessage.audio = mediaBuffer;
+                        } else {
+                            mediaMessage.document = mediaBuffer;
+                            mediaMessage.mimetype = media.fileType;
+                            mediaMessage.fileName = media.originalName;
+                        }
+                        
+                        if (responseText) {
+                            mediaMessage.caption = responseText;
+                        }
+                        
+                        sentMessage = await sock.sendMessage(remoteJid, mediaMessage);
+                        console.log(`[AIChatbotProcessor] Sent media with caption to ${remoteJid}`);
+                        
+                    } else {
+                        console.warn(`[AIChatbotProcessor] Media record not found for ID: ${campaign.mediaAttachments[0]}`);
+                        // Fallback to text message
+                        sentMessage = await sock.sendMessage(remoteJid, { text: responseText });
+                    }
+                } catch (mediaError) {
+                    console.error(`[AIChatbotProcessor] Error sending media:`, mediaError);
+                    console.warn(`[AIChatbotProcessor] Media processing failed, sending text only`);
+                    // Fallback to text message
+                    sentMessage = await sock.sendMessage(remoteJid, { text: responseText });
+                }
+            } else {
+                // Send text response
+                sentMessage = await sock.sendMessage(remoteJid, { text: responseText });
+            }
 
             // Save message to database
             try {
@@ -306,6 +558,15 @@ class AIChatbotProcessor {
             }
 
             console.log(`[AIChatbotProcessor] Sent chatbot response to ${remoteJid} from campaign ${campaign._id}`);
+            
+            // Check for nextBotAction to chain to another campaign
+            if (campaign.nextBotAction && campaign.nextBotAction.trim()) {
+                // Initialize chain tracking for this message if not exists
+                if (!messageData.chainTracker) {
+                    messageData.chainTracker = new Set();
+                }
+                await this.handleNextBotAction(userId, deviceId, campaign.nextBotAction, remoteJid, originalMessage, messageData.chainTracker);
+            }
             
             // Send webhook if API Rest Data is enabled
             try {
@@ -348,6 +609,88 @@ class AIChatbotProcessor {
         } catch (error) {
             console.error('[AIChatbotProcessor] Error sending chatbot response:', error);
             return false;
+        }
+    }
+
+    // Handle nextBotAction - chain to another campaign or AI response
+    async handleNextBotAction(userId, deviceId, nextBotAction, remoteJid, originalMessage, chainTracker = new Set()) {
+        try {
+            console.log(`[AIChatbotProcessor] Processing nextBotAction: "${nextBotAction}" for ${remoteJid}`);
+
+            // Check if nextBotAction is "AI_REPLY" or similar AI trigger
+            if (nextBotAction.toLowerCase().includes('ai')) {
+                console.log(`[AIChatbotProcessor] nextBotAction is AI response type, triggering AI processing`);
+                // Find an AI-powered campaign to handle this
+                const aiCampaigns = await Campaign.find({
+                    userId: userId,
+                    campaignType: 'ai_chatbot',
+                    useAiFeature: 'use_ai',
+                    status: 'enable',
+                    statusEnabled: true
+                }).sort({ createdAt: -1 }).limit(1);
+
+                if (aiCampaigns.length > 0) {
+                    const aiCampaign = aiCampaigns[0];
+                    console.log(`[AIChatbotProcessor] Found AI campaign ${aiCampaign._id} for nextBotAction`);
+                    await this.sendChatbotResponse(userId, deviceId, aiCampaign, remoteJid, originalMessage, false);
+                    return;
+                }
+            }
+
+            // Try to find campaign by flowId (nextBotAction should contain flow ID)
+            const nextCampaign = await Campaign.findOne({
+                flowId: nextBotAction,
+                userId: userId,
+                campaignType: 'ai_chatbot',
+                status: 'enable',
+                statusEnabled: true
+            });
+
+            if (nextCampaign) {
+                console.log(`[AIChatbotProcessor] Found next campaign: ${nextCampaign._id} (${nextCampaign.name}) with flowId: ${nextBotAction}`);
+                
+                // Prevent infinite loops
+                if (chainTracker.has(nextCampaign._id.toString())) {
+                    console.warn(`[AIChatbotProcessor] Loop detected! Campaign ${nextCampaign._id} already processed. Ending chain.`);
+                    return;
+                }
+                chainTracker.add(nextCampaign._id.toString());
+
+                // Limit chain depth to prevent excessive chaining
+                if (chainTracker.size > 5) {
+                    console.warn(`[AIChatbotProcessor] Maximum chain depth (5) reached. Ending chain.`);
+                    return;
+                }
+                
+                // Add small delay to make conversation feel more natural
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Send response from the chained campaign with chain tracking
+                const messageData = { chainTracker };
+                await this.sendChatbotResponse(userId, deviceId, nextCampaign, remoteJid, originalMessage, false, messageData);
+            } else {
+                console.warn(`[AIChatbotProcessor] No campaign found with flowId: ${nextBotAction} for user ${userId}`);
+                
+                // Fallback: try to find by campaign ID
+                const nextCampaignById = await Campaign.findOne({
+                    _id: nextBotAction,
+                    userId: userId,
+                    campaignType: 'ai_chatbot',
+                    status: 'enable',
+                    statusEnabled: true
+                });
+
+                if (nextCampaignById) {
+                    console.log(`[AIChatbotProcessor] Found next campaign by ID: ${nextCampaignById._id} (${nextCampaignById.name})`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    await this.sendChatbotResponse(userId, deviceId, nextCampaignById, remoteJid, originalMessage, false);
+                } else {
+                    console.warn(`[AIChatbotProcessor] nextBotAction "${nextBotAction}" not found - no chaining performed`);
+                }
+            }
+
+        } catch (error) {
+            console.error(`[AIChatbotProcessor] Error handling nextBotAction: ${nextBotAction}:`, error);
         }
     }
 

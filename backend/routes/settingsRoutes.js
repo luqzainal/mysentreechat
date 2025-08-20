@@ -9,15 +9,23 @@ const OpenAI = require('openai');
 // @access  Private
 router.get('/ai', protect, async (req, res) => {
   try {
-    let settings = await Setting.findOne({ userId: req.user.id }).select('openaiApiKey');
+    let settings = await Setting.findOne({ userId: req.user.id }).select('openaiApiKey aiModel aiTemperature aiMaxTokens');
     if (!settings) {
-      // Jika tiada settings, cipta satu dokumen kosong (atau kembalikan default)
-      // settings = await Setting.create({ userId: req.user.id }); 
-       return res.json({ openaiApiKey: '' }); // Kembalikan string kosong jika tiada
+      // Jika tiada settings, kembalikan default values
+      return res.json({ 
+        openaiApiKey: '',
+        aiModel: 'gpt-3.5-turbo',
+        aiTemperature: 0.7,
+        aiMaxTokens: 1000
+      });
     }
-     // Perlu ambil balik field openaiApiKey kerana ia `select: false`
-    settings = await Setting.findById(settings._id).select('openaiApiKey');
-    res.json({ openaiApiKey: settings.openaiApiKey || '' });
+    
+    res.json({ 
+      openaiApiKey: settings.openaiApiKey || '',
+      aiModel: settings.aiModel || 'gpt-3.5-turbo',
+      aiTemperature: settings.aiTemperature || 0.7,
+      aiMaxTokens: settings.aiMaxTokens || 1000
+    });
   } catch (error) {
     console.error('Error getting AI settings:', error);
     res.status(500).json({ message: 'Server Error' });
@@ -28,10 +36,19 @@ router.get('/ai', protect, async (req, res) => {
 // @route   PUT /api/settings/ai
 // @access  Private
 router.put('/ai', protect, async (req, res) => {
-  const { openaiApiKey } = req.body;
+  const { openaiApiKey, aiModel, aiTemperature, aiMaxTokens } = req.body;
 
   if (typeof openaiApiKey === 'undefined') {
       return res.status(400).json({ message: 'openaiApiKey is required' });
+  }
+
+  // Validate AI settings if provided
+  if (aiTemperature !== undefined && (aiTemperature < 0 || aiTemperature > 1)) {
+    return res.status(400).json({ message: 'aiTemperature must be between 0 and 1' });
+  }
+
+  if (aiMaxTokens !== undefined && (aiMaxTokens < 100 || aiMaxTokens > 4000)) {
+    return res.status(400).json({ message: 'aiMaxTokens must be between 100 and 4000' });
   }
 
   try {
@@ -41,11 +58,17 @@ router.put('/ai', protect, async (req, res) => {
       // Jika tiada, cipta baru
       settings = await Setting.create({
         userId: req.user.id,
-        openaiApiKey: openaiApiKey
+        openaiApiKey: openaiApiKey,
+        aiModel: aiModel || 'gpt-3.5-turbo',
+        aiTemperature: aiTemperature || 0.7,
+        aiMaxTokens: aiMaxTokens || 1000
       });
     } else {
       // Jika ada, kemaskini
       settings.openaiApiKey = openaiApiKey;
+      if (aiModel !== undefined) settings.aiModel = aiModel;
+      if (aiTemperature !== undefined) settings.aiTemperature = aiTemperature;
+      if (aiMaxTokens !== undefined) settings.aiMaxTokens = aiMaxTokens;
       await settings.save();
     }
 
@@ -68,17 +91,22 @@ router.post('/ai/test', protect, async (req, res) => {
 
   // Use provided API key or get from user settings
   let testApiKey = apiKey;
+  let userAiModel = 'gpt-3.5-turbo';
+  let userTemperature = 0.7;
   
-  if (!testApiKey) {
-    try {
-      const settings = await Setting.findOne({ userId: req.user.id }).select('openaiApiKey');
+  try {
+    const settings = await Setting.findOne({ userId: req.user.id }).select('openaiApiKey aiModel aiTemperature');
+    if (!testApiKey) {
       testApiKey = settings?.openaiApiKey;
-    } catch (error) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Error retrieving API key from settings' 
-      });
     }
+    // Use user's saved AI settings for testing
+    userAiModel = settings?.aiModel || 'gpt-3.5-turbo';
+    userTemperature = settings?.aiTemperature || 0.7;
+  } catch (error) {
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Error retrieving settings' 
+    });
   }
 
   if (!testApiKey) {
@@ -106,10 +134,10 @@ router.post('/ai/test', protect, async (req, res) => {
 
     console.log(`[AI Test] Testing API key for user ${req.user.id}`);
     
-    // Make a simple test request to OpenAI
+    // Make a simple test request to OpenAI using user's settings
     const startTime = Date.now();
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: userAiModel,
       messages: [
         {
           role: "system",
@@ -121,7 +149,7 @@ router.post('/ai/test', protect, async (req, res) => {
         }
       ],
       max_tokens: 50,
-      temperature: 0.7
+      temperature: userTemperature
     });
 
     const responseTime = Date.now() - startTime;

@@ -61,7 +61,6 @@ for var in "${required_vars[@]}"; do
         exit 1
     fi
 done
-
 # Create necessary directories
 echo "📁 Creating directories..."
 mkdir -p logs uploads mongo-init backups

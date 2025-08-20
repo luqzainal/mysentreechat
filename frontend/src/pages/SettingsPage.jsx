@@ -4,8 +4,10 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+// import { Slider } from "@/components/ui/slider"; // Component tidak wujud, guna HTML input range
 import { toast } from "sonner";
-import { Loader2, CheckCircle2, XCircle, Zap, Eye, EyeOff } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Zap, Eye, EyeOff, Settings, Thermometer } from 'lucide-react';
 import api from '../services/api'; // Import API service
 import { useAuth } from '../contexts/AuthContext';
 
@@ -15,6 +17,9 @@ import RefreshButton from '../components/RefreshButton';
 function SettingsPage() {
   const { user } = useAuth();
   const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo');
+  const [temperature, setTemperature] = useState([0.7]);
+  const [maxTokens, setMaxTokens] = useState(1000);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -30,6 +35,9 @@ function SettingsPage() {
         try {
            const response = await api.get('/settings/ai'); 
            setOpenaiApiKey(response.data.openaiApiKey || '');
+           setSelectedModel(response.data.aiModel || 'gpt-3.5-turbo');
+           setTemperature([response.data.aiTemperature || 0.7]);
+           setMaxTokens(response.data.aiMaxTokens || 1000);
            if (response.data.openaiApiKey) {
              setLastTestStatus('saved');
            }
@@ -57,7 +65,12 @@ function SettingsPage() {
     toast.info("Saving AI settings...");
 
     try {
-      await api.put('/settings/ai', { openaiApiKey });
+      await api.put('/settings/ai', { 
+        openaiApiKey,
+        aiModel: selectedModel,
+        aiTemperature: temperature[0],
+        aiMaxTokens: maxTokens
+      });
       toast.success("AI settings saved successfully.");
       setLastTestStatus('saved');
     } catch (error) {
@@ -216,6 +229,136 @@ function SettingsPage() {
             </p>
           </div>
 
+          {/* AI Model Configuration Section */}
+          <div className="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50">
+            <div className="flex items-center gap-2 mb-4">
+              <Settings className="h-5 w-5 text-blue-600" />
+              <h3 className="font-semibold text-blue-800">AI Model Configuration</h3>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Model Selection */}
+              <div className="space-y-2">
+                <Label htmlFor="aiModel">AI Model</Label>
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger id="aiModel">
+                    <SelectValue placeholder="Select AI model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gpt-3.5-turbo">
+                      <div className="flex flex-col">
+                        <span className="font-medium">GPT-3.5 Turbo</span>
+                        <span className="text-xs text-muted-foreground">Fast, cost-effective, good for most tasks</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="gpt-4">
+                      <div className="flex flex-col">
+                        <span className="font-medium">GPT-4</span>
+                        <span className="text-xs text-muted-foreground">Most capable, better reasoning, higher cost</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="gpt-4-turbo">
+                      <div className="flex flex-col">
+                        <span className="font-medium">GPT-4 Turbo</span>
+                        <span className="text-xs text-muted-foreground">Latest GPT-4, faster and more efficient</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="gpt-4o">
+                      <div className="flex flex-col">
+                        <span className="font-medium">GPT-4o</span>
+                        <span className="text-xs text-muted-foreground">Multimodal flagship model</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="gpt-4o-mini">
+                      <div className="flex flex-col">
+                        <span className="font-medium">GPT-4o Mini</span>
+                        <span className="text-xs text-muted-foreground">Affordable and intelligent small model</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Different models have different capabilities and costs. GPT-3.5 is recommended for most use cases.
+                </p>
+              </div>
+
+              {/* Max Tokens */}
+              <div className="space-y-2">
+                <Label htmlFor="maxTokens">Max Tokens</Label>
+                <Input
+                  id="maxTokens"
+                  type="number"
+                  min="100"
+                  max="4000"
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(parseInt(e.target.value) || 1000)}
+                  placeholder="1000"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Maximum number of tokens in AI responses (100-4000)
+                </p>
+              </div>
+            </div>
+
+            {/* Temperature Control */}
+            <div className="mt-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Thermometer className="h-4 w-4 text-purple-600" />
+                  <Label htmlFor="temperature">Creativity Level (Temperature)</Label>
+                </div>
+                <span className="text-sm font-mono bg-purple-100 px-2 py-1 rounded">
+                  {temperature[0]}
+                </span>
+              </div>
+              
+              <div className="space-y-2">
+                <input
+                  id="temperature"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={temperature[0]}
+                  onChange={(e) => setTemperature([parseFloat(e.target.value)])}
+                  className="w-full h-2 bg-gradient-to-r from-blue-200 to-purple-200 rounded-lg appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #dbeafe 0%, #e0e7ff ${temperature[0] * 100}%, #f3f4f6 ${temperature[0] * 100}%, #f3f4f6 100%)`
+                  }}
+                />
+                
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>0.0 - Conservative</span>
+                  <span>0.5 - Balanced</span>
+                  <span>1.0 - Creative</span>
+                </div>
+              </div>
+              
+              <div className="p-3 bg-white border rounded-md">
+                <div className="text-xs space-y-1">
+                  <p className="font-semibold text-purple-700">Temperature Guide:</p>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="text-center p-2 bg-blue-50 rounded">
+                      <p className="font-medium">0.0 - 0.3</p>
+                      <p className="text-muted-foreground">Conservative</p>
+                      <p>Consistent, predictable responses</p>
+                    </div>
+                    <div className="text-center p-2 bg-green-50 rounded">
+                      <p className="font-medium">0.4 - 0.7</p>
+                      <p className="text-muted-foreground">Balanced</p>
+                      <p>Good mix of consistency and variety</p>
+                    </div>
+                    <div className="text-center p-2 bg-purple-50 rounded">
+                      <p className="font-medium">0.8 - 1.0</p>
+                      <p className="text-muted-foreground">Creative</p>
+                      <p>More varied, creative responses</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Test Connection Section */}
           <div className="border rounded-lg p-4 bg-slate-50">
             <h3 className="font-semibold mb-3">Test API Connection</h3>
@@ -318,7 +461,7 @@ function SettingsPage() {
                 Saving...
               </>
             ) : (
-              'Save API Key'
+              'Save AI Settings'
             )}
           </Button>
           
@@ -344,8 +487,10 @@ function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <div>• <strong>API Key Security:</strong> Your API key is stored securely and only used for your AI chatbot features.</div>
-          <div>• <strong>Usage Billing:</strong> AI requests will be charged to your OpenAI account based on token usage.</div>
-          <div>• <strong>Model Selection:</strong> GPT-3.5-turbo is recommended for cost-effective operations.</div>
+          <div>• <strong>Usage Billing:</strong> AI requests will be charged to your OpenAI account based on token usage and model selected.</div>
+          <div>• <strong>Model Selection:</strong> GPT-3.5-turbo is recommended for cost-effective operations. GPT-4 models provide better quality but cost more.</div>
+          <div>• <strong>Temperature Setting:</strong> Lower values (0.0-0.3) give consistent responses, higher values (0.7-1.0) give more creative responses.</div>
+          <div>• <strong>Token Limits:</strong> Higher max tokens allow longer responses but increase costs per request.</div>
           <div>• <strong>Rate Limits:</strong> OpenAI has rate limits based on your account tier and usage.</div>
           <div>• <strong>Content Policy:</strong> Ensure your AI chatbot content complies with OpenAI's usage policies.</div>
         </CardContent>

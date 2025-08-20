@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import io from 'socket.io-client';
 import QRCode from 'react-qr-code';
 import { useAuth } from '../contexts/AuthContext';
@@ -42,13 +42,27 @@ function ScanDevicePage() {
   console.log("[ScanDevicePage] User object from useAuth:", user);
   console.log("[ScanDevicePage] currentUserPlan determined as:", currentUserPlan);
 
-  const limitForCurrentPlan = planLimits[currentUserPlan.toLowerCase()] || 1;
-  console.log("[ScanDevicePage] Limit for current plan (", currentUserPlan, ") is:", limitForCurrentPlan);
+  // Memoize plan calculations to prevent recalculation
+  const limitForCurrentPlan = useMemo(() => {
+    const limit = planLimits[currentUserPlan.toLowerCase()] || 1;
+    console.log("[ScanDevicePage] Limit for current plan (", currentUserPlan, ") is:", limit);
+    return limit;
+  }, [currentUserPlan]);
+
+  // Memoize connected devices count
+  const connectedDevicesCount = useMemo(() => {
+    return connectedDevices.filter(d => d.connectionStatus === 'connected').length;
+  }, [connectedDevices]);
 
   // Fetch devices (dijadikan useCallback)
-  const fetchDevices = useCallback(async () => {
+  const fetchDevices = useCallback(async (showLoading = true) => {
       if (!user) return; // Jangan fetch jika user belum ada
-      setIsDeviceListLoading(true);
+      
+      // Only show loading for initial fetch or manual refresh
+      if (showLoading) {
+          setIsDeviceListLoading(true);
+      }
+      
       try {
           const response = await api.get('/whatsapp/devices');
           setConnectedDevices(response.data || []); // API sepatutnya kembalikan array
@@ -57,18 +71,20 @@ function ScanDevicePage() {
           toast.error("Could not load connected device list.");
           setConnectedDevices([]); // Kosongkan jika gagal
       } finally {
-          setIsDeviceListLoading(false);
+          if (showLoading) {
+              setIsDeviceListLoading(false);
+          }
       }
   }, [user]); // Dependency pada user
 
-  // Debounced version of fetchDevices
+  // Debounced version of fetchDevices with longer delay to prevent blinking
   const debouncedFetchDevices = useCallback(() => {
       if (fetchTimeoutRef.current) {
           clearTimeout(fetchTimeoutRef.current);
       }
       fetchTimeoutRef.current = setTimeout(() => {
-          fetchDevices();
-      }, 1000); // Wait 1 second before fetching
+          fetchDevices(false); // Don't show loading spinner for debounced updates
+      }, 2000); // Wait 2 seconds before fetching to reduce blinking
   }, [fetchDevices]);
 
   // useEffect untuk fetch devices pada muatan awal dan bila fetchDevices berubah
@@ -118,13 +134,28 @@ function ScanDevicePage() {
       setConnectionStatus(prevStatus => {
         // Only update if status actually changed to prevent unnecessary re-renders
         if (prevStatus === status) return prevStatus;
+        console.log(`[ScanDevicePage] Status changing from ${prevStatus} to ${status}`);
         return status;
       });
-      if (status !== 'waiting_qr') setRawQrString(null);
-      if (status === 'connected' || status === 'disconnected' || status === 'limit_reached') {
-          // Use debounced version to prevent rapid updates
+      
+      // Only clear QR if status is not waiting_qr
+      if (status !== 'waiting_qr') {
+        setRawQrString(prevQr => {
+          if (prevQr === null) return prevQr;
+          console.log("[ScanDevicePage] Clearing QR code");
+          return null;
+        });
+      }
+      
+      // Only fetch devices on specific status changes to reduce blinking
+      if (status === 'connected') {
+          // Fetch devices after successful connection
+          debouncedFetchDevices();
+      } else if (status === 'disconnected') {
+          // Fetch devices after disconnection (less frequent)
           debouncedFetchDevices();
       }
+      // Removed 'limit_reached' to reduce unnecessary fetches
     });
     socket.on('whatsapp_qr', (qrString) => {
       console.log("[ScanDevicePage] WhatsApp QR string received from backend:", qrString ? qrString.substring(0,30) + '...' : 'EMPTY_QR_STRING');
@@ -176,12 +207,9 @@ function ScanDevicePage() {
     }
   }, [user?._id]); // Remove connectSocket dependency to prevent recreation
 
-  const handleConnectRequest = () => {
-    const currentActiveDeviceCount = connectedDevices.filter(d => d.connected).length;
-    const limit = limitForCurrentPlan;
-
-    if (currentActiveDeviceCount >= limit) {
-        toast.error(`Cannot connect more devices. Your plan (${currentUserPlan}: ${limit} device(s)) limit has been reached.`);
+  const handleConnectRequest = useCallback(() => {
+    if (connectedDevicesCount >= limitForCurrentPlan) {
+        toast.error(`Cannot connect more devices. Your plan (${currentUserPlan}: ${limitForCurrentPlan} device(s)) limit has been reached.`);
         return;
     }
     if (socket && socket.connected && user?._id) {
@@ -194,9 +222,9 @@ function ScanDevicePage() {
        console.warn("[ScanDevicePage] Cannot send connect request. Socket connected: ", socket?.connected, "User ID: ", user?._id);
        toast.error("Connection to server not ready or user not available.");
     }
-  };
+  }, [connectedDevicesCount, limitForCurrentPlan, currentUserPlan, user?._id]);
 
-  const handleDisconnectRequest = async (deviceId = null) => {
+  const handleDisconnectRequest = useCallback(async (deviceId = null) => {
       if (deviceId) { // Putuskan sambungan peranti spesifik dan padam dari DB
           toast.info(`Attempting to remove device ${deviceId}...`);
           try {
@@ -218,10 +246,10 @@ function ScanDevicePage() {
                toast.error("No active server connection to disconnect session.");
           }
       }
-  }
+  }, [fetchDevices]);
 
-  // Papar status sambungan
-  const renderStatusDisplay = () => {
+  // Memoize status display to prevent unnecessary re-renders
+  const statusDisplay = useMemo(() => {
     let icon = <Loader2 className="animate-spin h-5 w-5 mr-2" />;
     let text = connectionStatus;
     let variant = "secondary";
@@ -258,7 +286,42 @@ function ScanDevicePage() {
            {text}
          </Badge>
     );
-  };
+  }, [connectionStatus]); // Only re-compute when connectionStatus changes
+
+  // Memoize device list to prevent unnecessary re-renders
+  const deviceList = useMemo(() => {
+    if (isDeviceListLoading) {
+      return <p>Loading device list...</p>;
+    }
+    
+    if (connectedDevices.length === 0) {
+      return <p className="text-muted-foreground">No devices are currently linked to your account.</p>;
+    }
+    
+    return (
+      <div className="space-y-3">
+        {connectedDevices.map(device => (
+          <div key={device.id} className="flex items-center justify-between rounded-lg border p-3">
+            <div className="flex items-center space-x-3">
+              <Smartphone className={`h-6 w-6 ${device.connected ? 'text-green-600' : 'text-muted-foreground'}`} />
+              <div>
+                <p className="font-medium">{device.name}</p>
+                <p className="text-sm text-muted-foreground">{device.number}</p>
+              </div>
+            </div>
+            <Button 
+              variant={device.connected ? "outline" : "destructive"} 
+              size="sm" 
+              onClick={() => handleDisconnectRequest(device.id)}
+            >
+              {device.connected ? <Power className="mr-1.5 h-4 w-4" /> : <Trash2 className="mr-1.5 h-4 w-4" />}
+              {device.connected ? "Disconnect" : "Remove Registration"} 
+            </Button>
+          </div>
+        ))}
+      </div>
+    );
+  }, [connectedDevices, isDeviceListLoading]); // Only re-render when devices or loading state changes
 
   return (
     <div className="container mx-auto p-4 space-y-6">
@@ -272,7 +335,7 @@ function ScanDevicePage() {
           <CardHeader>
              <div className="flex justify-between items-center">
                  <CardTitle>Connect New Device</CardTitle>
-                 {renderStatusDisplay()}
+                 {statusDisplay}
              </div>
              <CardDescription>
                 Scan the QR code with your WhatsApp. 
@@ -282,14 +345,14 @@ function ScanDevicePage() {
           <CardContent className="flex flex-col items-center space-y-4">
               {/* PAPARKAN QR JIKA DALAM PROSES MENUNGGU SCAN */}
               {connectionStatus === 'waiting_qr' && rawQrString && (
-                 <div className="p-4 bg-white rounded-lg shadow-inner border">
+                 <div className="p-4 bg-white rounded-lg shadow-inner border" key={rawQrString}>
                      <QRCode value={rawQrString} size={250} />
                  </div>
               )}
 
               {/* PAPARKAN BUTANG GENERATE JIKA BELUM SAMPAI HAD & TIDAK SEDANG CONNECTING/WAITING */}
               { connectionStatus !== 'Connecting...' && connectionStatus !== 'waiting_qr' &&
-                connectedDevices.filter(d => d.connectionStatus === 'connected').length < limitForCurrentPlan && (
+                connectedDevicesCount < limitForCurrentPlan && (
                   <Button onClick={handleConnectRequest} disabled={!socketConnected || !user?._id}>
                       <QrCodeIcon className="mr-2 h-4 w-4" /> Connect Another Device
                   </Button>
@@ -301,7 +364,7 @@ function ScanDevicePage() {
               )}
 
               {/* Tunjukkan jika had dicapai */}
-              { connectedDevices.filter(d => d.connectionStatus === 'connected').length >= limitForCurrentPlan &&
+              { connectedDevicesCount >= limitForCurrentPlan &&
                 connectionStatus !== 'waiting_qr' && connectionStatus !== 'Connecting...' && (
                  <p className="text-sm text-yellow-600">Connection limit reached for your plan.</p>
               )}
@@ -326,33 +389,7 @@ function ScanDevicePage() {
                <CardDescription>Manage devices linked to your account.</CardDescription>
            </CardHeader>
            <CardContent>
-               {isDeviceListLoading ? (
-                   <p>Loading device list...</p>
-               ) : connectedDevices.length === 0 ? (
-                   <p className="text-muted-foreground">No devices are currently linked to your account.</p>
-               ) : (
-                   <div className="space-y-3">
-                       {connectedDevices.map(device => (
-                           <div key={device.id} className="flex items-center justify-between rounded-lg border p-3">
-                               <div className="flex items-center space-x-3">
-                                   <Smartphone className={`h-6 w-6 ${device.connected ? 'text-green-600' : 'text-muted-foreground'}`} />
-                                   <div>
-                                       <p className="font-medium">{device.name}</p>
-                                       <p className="text-sm text-muted-foreground">{device.number}</p>
-                                   </div>
-                               </div>
-                               <Button 
-                                   variant={device.connected ? "outline" : "destructive"} 
-                                   size="sm" 
-                                   onClick={() => handleDisconnectRequest(device.id)} // Sentiasa panggil dengan device.id
-                                >
-                                   {device.connected ? <Power className="mr-1.5 h-4 w-4" /> : <Trash2 className="mr-1.5 h-4 w-4" />}
-                                   {device.connected ? "Disconnect" : "Remove Registration"} 
-                               </Button>
-                           </div>
-                       ))}
-                   </div>
-               )}
+               {deviceList}
                {/* TODO: Add pagination or scrolling if list is long */} 
            </CardContent>
        </Card>

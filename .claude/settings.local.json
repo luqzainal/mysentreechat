@@ -15,8 +15,13 @@
       "Bash(chmod:*)",
       "Bash(cp:*)",
       "Bash(timeout:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(cd:*)",
+      "Bash(pkill:*)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "F:\\f\\PROJEK2\\WAZIPER V2"
+    ]
   }
 }

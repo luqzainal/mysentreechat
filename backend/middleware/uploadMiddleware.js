@@ -8,20 +8,8 @@ if (!fs.existsSync(uploadDir)){
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Konfigurasi storan Multer (untuk media)
-const mediaStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const mediaDir = path.join(uploadDir, 'media'); // Subdirektori media
-    if (!fs.existsSync(mediaDir)){ fs.mkdirSync(mediaDir, { recursive: true }); }
-    cb(null, mediaDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    // Guna ID pengguna jika ada untuk susunan yang lebih baik
-    const userId = req.user ? req.user.id : 'guest';
-    cb(null, `${userId}-${uniqueSuffix}${path.extname(file.originalname)}`);
-  }
-});
+// Konfigurasi storan Multer (untuk media) - use memory storage for S3 upload
+const mediaStorage = multer.memoryStorage(); // Changed to memory storage for S3 compatibility
 
 // Konfigurasi storan Multer (untuk Excel - simpan di memori)
 const excelStorage = multer.memoryStorage();

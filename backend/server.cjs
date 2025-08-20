@@ -38,6 +38,18 @@ dotenv.config();
 
 connectDB();
 
+// Test S3 connection on startup
+const s3Service = require('./services/s3Service.js');
+s3Service.testConnection().then(success => {
+    if (success) {
+        console.log('[Startup] S3 service ready');
+    } else {
+        console.warn('[Startup] S3 service connection failed - check configuration');
+    }
+}).catch(error => {
+    console.error('[Startup] S3 service error:', error);
+});
+
 const app = express();
 const server = http.createServer(app);
 
